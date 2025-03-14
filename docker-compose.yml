@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000/api
+      - NODE_ENV=development
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - REDIS_HOST=redis
+      - MAX_WORKERS=2
+      - ENVIRONMENT=development
+
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  worker:
+    build: ./backend
+    command: celery -A app.core.worker worker --loglevel=info
+    depends_on:
+      - backend
+      - redis
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - REDIS_HOST=redis
+      - MAX_WORKERS=2
+      - ENVIRONMENT=development
+
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  redis_data:

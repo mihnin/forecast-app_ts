@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pydantic
+python-multipart
+pandas
+numpy
+scikit-learn
+celery
+redis
+pytest
+httpx
+plotly
+statsmodels
+autogluon.timeseries
+openpyxl
