@@ -2,20 +2,20 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
+# Установка системных зависимостей и SSL сертификатов
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libffi-dev \
-    libmagic1 \
-    && apt-get clean \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Копирование и установка зависимостей
+# Копирование зависимостей
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Копирование кода приложения
+# Копирование исходного кода
 COPY . .
 
-# Запуск приложения
+# Команда запуска
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

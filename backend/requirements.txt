@@ -3,25 +3,23 @@ fastapi
 uvicorn
 python-multipart
 SQLAlchemy
-alembic
-psycopg2-binary
-redis
-aioredis
+alembic>=1.15.0
+psycopg2-binary>=2.9.0
+redis>=5.0.0
+aioredis>=2.0.0
 holidays
 pydantic-settings
 
 # Data processing and analysis
-# Понижаем версию numpy для совместимости с tensorflow
-numpy
-pandas
-scipy
-statsmodels
+numpy>=1.21.0
+pandas>=2.0.0
+scipy>=1.15.0
+statsmodels>=0.14.0
 
 # Machine learning
-scikit-learn
-prophet
-# Обновляем версии tensorflow и keras до совместимых с выбранным numpy
-autogluon.timeseries
+scikit-learn>=1.6.0
+prophet>=1.1.0
+autogluon.timeseries>=1.0.0
 
 # Utilities
 python-jose[cryptography]
@@ -36,4 +34,5 @@ pytest
 pytest-asyncio
 httpx
 
-Celery
+# Task queue
+celery>=5.4.0
