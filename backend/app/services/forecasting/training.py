@@ -4,13 +4,134 @@ import logging
 import os
 import json
 import time
-from typing import Dict, Any, List, Optional
+import traceback  # Добавлен для более подробного логирования ошибок
+from typing import Dict, Any, List, Optional, Tuple
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 from app.services.features.feature_engineering import add_russian_holiday_feature, fill_missing_values
 from app.services.data.data_processing import convert_to_timeseries
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Добавляем кастомные метрики для оценки моделей
+def calculate_mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Рассчитывает Mean Absolute Percentage Error (MAPE)
+    
+    Args:
+        y_true: Истинные значения
+        y_pred: Предсказанные значения
+        
+    Returns:
+        MAPE в процентах
+    """
+    mask = y_true != 0
+    return 100 * np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]))
+
+
+def calculate_rmsse(y_true: np.ndarray, y_pred: np.ndarray, train_values: np.ndarray) -> float:
+    """
+    Рассчитывает Root Mean Squared Scaled Error (RMSSE)
+    
+    Args:
+        y_true: Истинные значения
+        y_pred: Предсказанные значения
+        train_values: Значения обучающего набора для масштабирования
+        
+    Returns:
+        RMSSE
+    """
+    # Вычисляем знаменатель (сезонная наивная ошибка на тренировочном наборе)
+    naive_errors = np.diff(train_values)
+    naive_error_sq_mean = np.mean(naive_errors ** 2)
+    
+    # Если знаменатель близок к нулю, возвращаем большое значение или применяем регуляризацию
+    if naive_error_sq_mean < 1e-10:
+        return np.mean((y_true - y_pred) ** 2) / (naive_error_sq_mean + 1e-10)
+    
+    # Вычисляем числитель (MSE модели)
+    model_error_sq_mean = np.mean((y_true - y_pred) ** 2)
+    
+    # RMSSE
+    return np.sqrt(model_error_sq_mean / naive_error_sq_mean)
+
+
+def calculate_additional_metrics(predictor: TimeSeriesPredictor, ts_df: TimeSeriesDataFrame) -> Dict[str, Dict[str, float]]:
+    """
+    Рассчитывает дополнительные метрики для моделей
+    
+    Args:
+        predictor: Обученный TimeSeriesPredictor
+        ts_df: Оригинальный TimeSeriesDataFrame
+        
+    Returns:
+        Словарь с дополнительными метриками для каждой модели
+    """
+    metrics = {}
+    
+    try:
+        # Получаем все модели
+        model_names = predictor.get_model_names()
+        
+        for model_name in model_names:
+            # Разбиваем данные на обучение и валидацию
+            # (используем последние prediction_length точек для валидации)
+            last_idx = -predictor.prediction_length
+            if abs(last_idx) >= len(ts_df):
+                last_idx = -int(len(ts_df) * 0.2)  # Берем 20% в конце, если длина прогноза больше размера набора
+            
+            train_df = ts_df.slice_by_timestep(None, last_idx)
+            val_df = ts_df.slice_by_timestep(last_idx, None)
+            
+            if val_df.empty:
+                logger.warning(f"Недостаточно данных для валидации модели {model_name}")
+                continue
+                
+            # Делаем прогноз с указанной моделью
+            try:
+                preds = predictor.predict(train_df, model=model_name)
+                
+                # Получаем истинные значения
+                y_true = val_df['target'].values
+                
+                # Получаем предсказанные значения (используем медиану, если возможно)
+                if '0.5' in preds.columns:
+                    y_pred = preds['0.5'].values
+                elif 'mean' in preds.columns:
+                    y_pred = preds['mean'].values
+                else:
+                    y_pred = preds.iloc[:, 0].values  # берем первый столбец
+                
+                # Отсекаем по длине массивов (так как количество рядов может быть разным)
+                n = min(len(y_true), len(y_pred))
+                y_true = y_true[:n]
+                y_pred = y_pred[:n]
+                
+                # Рассчитываем MAPE
+                mape = calculate_mape(y_true, y_pred)
+                
+                # Рассчитываем RMSSE
+                train_values = train_df['target'].values
+                rmsse = calculate_rmsse(y_true, y_pred, train_values)
+                
+                # Сохраняем метрики
+                metrics[model_name] = {
+                    'MAPE': float(mape),
+                    'RMSSE': float(rmsse)
+                }
+                
+            except Exception as e:
+                logger.error(f"Ошибка при расчете дополнительных метрик для модели {model_name}: {str(e)}")
+                metrics[model_name] = {
+                    'error': str(e)
+                }
+                
+    except Exception as e:
+        logger.error(f"Ошибка при расчете дополнительных метрик: {str(e)}")
+        logger.error(traceback.format_exc())
+    
+    return metrics
+
 
 def prepare_training_task(params: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -59,13 +180,18 @@ def make_timeseries_dataframe(df: pd.DataFrame, static_df: Optional[pd.DataFrame
     Returns:
         TimeSeriesDataFrame для использования с AutoGluon
     """
-    ts_df = TimeSeriesDataFrame.from_data_frame(
-        df,
-        id_column="item_id",
-        timestamp_column="timestamp",
-        static_features_df=static_df
-    )
-    return ts_df
+    try:
+        ts_df = TimeSeriesDataFrame.from_data_frame(
+            df,
+            id_column="item_id",
+            timestamp_column="timestamp",
+            static_features_df=static_df
+        )
+        return ts_df
+    except Exception as e:
+        logger.error(f"Ошибка при создании TimeSeriesDataFrame: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise ValueError(f"Ошибка при создании TimeSeriesDataFrame: {str(e)}")
 
 
 def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,9 +212,11 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
         dataset_id = task_params["dataset_id"]
         
         if dataset_id not in DATASETS:
+            logger.error(f"Датасет с ID {dataset_id} не найден")
             raise ValueError(f"Датасет с ID {dataset_id} не найден")
         
-        df_train = DATASETS[dataset_id]["df"].copy()
+        # Копируем данные для предотвращения модификации оригинала
+        df_train = DATASETS[dataset_id]["df"].copy(deep=True)
         
         # Получаем названия колонок
         dt_col = task_params["columns"].get("date_column")
@@ -96,10 +224,23 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
         id_col = task_params["columns"].get("id_column")
         
         if not dt_col or not tgt_col or not id_col:
+            logger.error("Не указаны обязательные колонки (дата, целевая переменная, ID)")
             raise ValueError("Не указаны обязательные колонки (дата, целевая переменная, ID)")
+        
+        # Проверка наличия колонок в датасете
+        missing_cols = [col for col in [dt_col, tgt_col, id_col] if col not in df_train.columns]
+        if missing_cols:
+            logger.error(f"В датасете отсутствуют следующие колонки: {', '.join(missing_cols)}")
+            raise ValueError(f"В датасете отсутствуют следующие колонки: {', '.join(missing_cols)}")
         
         # Преобразуем даты
         df_train[dt_col] = pd.to_datetime(df_train[dt_col], errors="coerce")
+        
+        # Проверка на пропущенные значения в датах после преобразования
+        if df_train[dt_col].isna().any():
+            na_dates_count = df_train[dt_col].isna().sum()
+            logger.warning(f"Обнаружены пропущенные значения в столбце даты ({na_dates_count}). Удаляем соответствующие строки.")
+            df_train = df_train.dropna(subset=[dt_col])
         
         # Добавляем праздники, если нужно
         if task_params["use_holidays"]:
@@ -113,26 +254,57 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
             group_cols=task_params["group_cols"]
         )
         
+        # Проверка на наличие пропусков в целевой переменной
+        if df_train[tgt_col].isna().any():
+            na_target_count = df_train[tgt_col].isna().sum()
+            logger.warning(f"Обнаружены пропущенные значения в целевой переменной ({na_target_count}). Удаляем соответствующие строки.")
+            df_train = df_train.dropna(subset=[tgt_col])
+        
         # Подготавливаем статические признаки
         static_feats_val = task_params["static_features"]
         static_df = None
         if static_feats_val:
-            tmp = df_train[[id_col] + static_feats_val].drop_duplicates(subset=[id_col]).copy()
-            tmp.rename(columns={id_col: "item_id"}, inplace=True)
-            static_df = tmp
+            # Проверяем наличие статических признаков в датасете
+            missing_static_cols = [col for col in static_feats_val if col not in df_train.columns]
+            if missing_static_cols:
+                logger.warning(f"Следующие статические признаки отсутствуют в датасете: {', '.join(missing_static_cols)}")
+                static_feats_val = [col for col in static_feats_val if col in df_train.columns]
+            
+            if static_feats_val:  # Если после фильтрации еще остались признаки
+                tmp = df_train[[id_col] + static_feats_val].drop_duplicates(subset=[id_col]).copy()
+                tmp.rename(columns={id_col: "item_id"}, inplace=True)
+                static_df = tmp
         
         # Преобразуем в TimeSeriesDataFrame
+        logger.info("Преобразуем данные в формат временных рядов")
         df_prepared = convert_to_timeseries(df_train, id_col, dt_col, tgt_col)
+        
+        # Проверка на пустой результат преобразования
+        if df_prepared.empty:
+            logger.error("После преобразования в формат временных рядов получен пустой датафрейм")
+            raise ValueError("После преобразования данных получен пустой временной ряд")
+        
+        # Создаем TimeSeriesDataFrame
         ts_df = make_timeseries_dataframe(df_prepared, static_df=static_df)
+        
+        # Проверка на количество временных рядов
+        num_timeseries = ts_df['item_id'].nunique()
+        logger.info(f"Количество временных рядов: {num_timeseries}")
         
         # Устанавливаем частоту, если она задана явно
         freq_val = task_params["freq"]
         actual_freq = None
         if freq_val != "auto":
-            freq_short = freq_val.split(" ")[0] if " " in freq_val else freq_val
-            ts_df = ts_df.convert_frequency(freq_short)
-            ts_df = ts_df.fill_missing_values(method="ffill")
-            actual_freq = freq_short
+            try:
+                freq_short = freq_val.split(" ")[0] if " " in freq_val else freq_val
+                ts_df = ts_df.convert_frequency(freq_short)
+                ts_df = ts_df.fill_missing_values(method="ffill")
+                actual_freq = freq_short
+                logger.info(f"Частота временных рядов установлена на {freq_short}")
+            except Exception as e:
+                logger.error(f"Ошибка при установке частоты {freq_val}: {str(e)}")
+                logger.warning("Используем автоматическое определение частоты")
+                actual_freq = None
         
         # Готовим hyperparameters для выбранных моделей
         all_models_opt = "* (все)"
@@ -140,9 +312,11 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
         
         if not chosen_models_val or (len(chosen_models_val) == 1 and chosen_models_val[0] == all_models_opt):
             hyperparams = None
+            logger.info("Будут использованы все доступные модели")
         else:
             no_star = [m for m in chosen_models_val if m != all_models_opt]
             hyperparams = {m: {} for m in no_star}
+            logger.info(f"Выбраны следующие модели: {', '.join(no_star)}")
         
         # Подготавливаем метрику и квантили
         eval_key = task_params["metric"]
@@ -153,37 +327,63 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
         model_dir = os.path.join(settings.MODEL_DIR, model_id)
         os.makedirs(model_dir, exist_ok=True)
         
+        # Проверяем параметры обучения
+        prediction_length = task_params["prediction_length"]
+        if prediction_length <= 0:
+            logger.error(f"Некорректная длина прогноза: {prediction_length}")
+            raise ValueError("Длина прогноза должна быть положительным числом")
+        
+        time_limit = task_params["time_limit"]
+        if time_limit <= 0:
+            logger.warning(f"Отрицательное или нулевое время обучения, установим по умолчанию: {settings.DEFAULT_TIME_LIMIT}")
+            time_limit = settings.DEFAULT_TIME_LIMIT
+        
         # Создаем предиктор
-        predictor = TimeSeriesPredictor(
-            target="target",
-            prediction_length=task_params["prediction_length"],
-            eval_metric=eval_key,
-            freq=actual_freq,
-            quantile_levels=q_levels,
-            path=model_dir,
-            verbosity=2
-        )
+        try:
+            predictor = TimeSeriesPredictor(
+                target="target",
+                prediction_length=prediction_length,
+                eval_metric=eval_key,
+                freq=actual_freq,
+                quantile_levels=q_levels,
+                path=model_dir,
+                verbosity=2
+            )
+            logger.info(f"Создан TimeSeriesPredictor с параметрами: prediction_length={prediction_length}, eval_metric={eval_key}")
+        except Exception as e:
+            logger.error(f"Ошибка при создании TimeSeriesPredictor: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise ValueError(f"Ошибка инициализации модели: {str(e)}")
         
         # Запускаем обучение
         start_time = time.time()
         
-        # В AutoGluon 1.2 используем параметры кросс-валидации напрямую
-        predictor.fit(
-            train_data=ts_df,
-            time_limit=task_params["time_limit"],
-            presets=task_params["presets"],
-            hyperparameters=hyperparams,
-            num_val_windows=1,
-            val_step_size=task_params["prediction_length"],
-            refit_every_n_windows=1
-        )
-        
-        elapsed_time = time.time() - start_time
-        logger.info(f"Обучение завершено за {elapsed_time:.2f} секунд")
+        try:
+            # В AutoGluon 1.2 используем параметры кросс-валидации напрямую
+            predictor.fit(
+                train_data=ts_df,
+                time_limit=time_limit,
+                presets=task_params["presets"],
+                hyperparameters=hyperparams,
+                num_val_windows=1,
+                val_step_size=prediction_length,
+                refit_every_n_windows=1
+            )
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"Обучение завершено за {elapsed_time:.2f} секунд")
+        except Exception as e:
+            logger.error(f"Ошибка при обучении модели: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise ValueError(f"Ошибка при обучении модели: {str(e)}")
         
         # Получаем результаты обучения
         summ = predictor.fit_summary()
         leaderboard = predictor.leaderboard(ts_df)
+        
+        # Расчет дополнительных метрик
+        logger.info("Расчет дополнительных метрик оценки моделей")
+        additional_metrics = calculate_additional_metrics(predictor, ts_df)
         
         # Сохраняем метаданные модели
         save_model_metadata(
@@ -227,6 +427,7 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
             "training_time": elapsed_time,
             "leaderboard": leaderboard.to_dict("records"),
             "fit_summary": summ,
+            "additional_metrics": additional_metrics,
             "weighted_ensemble_info": ensemble_info,
             "model_path": model_dir
         }
@@ -236,7 +437,8 @@ def train_model(task_params: Dict[str, Any]) -> Dict[str, Any]:
         return result
     
     except Exception as e:
-        logger.error(f"Ошибка при обучении модели: {str(e)}")
+        logger.error(f"Критическая ошибка при обучении модели: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
 
 
@@ -288,3 +490,4 @@ def save_model_metadata(model_dir: str, dt_col: str, tgt_col: str, id_col: str,
             json.dump(info_dict, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Ошибка при сохранении model_info.json: {e}")
+        logger.error(traceback.format_exc())

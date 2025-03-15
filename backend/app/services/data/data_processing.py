@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import logging
+import traceback  # Добавляем для подробного логирования ошибок
 from typing import Tuple, Dict, Any, Optional, List
 from fastapi import HTTPException
 from app.models.data import DatasetInfo
@@ -21,6 +22,7 @@ def process_uploaded_file(file_path: str, chunk_size: int = 100000) -> Tuple[pd.
         info: Информация о датасете
     """
     if not os.path.exists(file_path):
+        logger.error(f"Файл не найден: {file_path}")
         raise HTTPException(status_code=404, detail=f"Файл не найден: {file_path}")
     
     file_ext = os.path.splitext(file_path)[1].lower()
@@ -29,6 +31,7 @@ def process_uploaded_file(file_path: str, chunk_size: int = 100000) -> Tuple[pd.
     logger.info(f"Обработка файла: {file_path} ({file_size_mb:.2f} МБ)")
     
     try:
+        # Проверка формата файла
         if file_ext == '.csv':
             if file_size_mb > 100 and chunk_size:
                 df = load_csv_in_chunks(file_path, chunk_size)
@@ -37,16 +40,35 @@ def process_uploaded_file(file_path: str, chunk_size: int = 100000) -> Tuple[pd.
         elif file_ext in ('.xls', '.xlsx'):
             if file_size_mb > 100:
                 logger.warning("Большие Excel-файлы могут загружаться медленно")
-            df = pd.read_excel(file_path)
+            try:
+                # Более безопасное чтение Excel-файлов с отключенным преобразованием типов
+                df = pd.read_excel(file_path, engine='openpyxl', 
+                                   dtype_backend='numpy_nullable')
+            except ImportError:
+                # Если openpyxl не доступен, используем xlrd
+                logger.warning("openpyxl не установлен, используем стандартный механизм чтения Excel")
+                df = pd.read_excel(file_path)
         else:
+            logger.error(f"Неподдерживаемый формат файла: {file_ext}")
             raise HTTPException(status_code=400, detail=f"Неподдерживаемый формат файла: {file_ext}")
         
-        # Создаем информацию о датасете
+        # Проверка на пустой датафрейм
+        if df.empty:
+            logger.error("Загруженный файл не содержит данных")
+            raise HTTPException(status_code=400, detail="Файл не содержит данных")
+        
+        # Проверка на минимальное количество колонок
+        if len(df.columns) < 2:
+            logger.error("Загруженный файл должен содержать минимум 2 колонки")
+            raise HTTPException(status_code=400, detail="Файл должен содержать минимум 2 колонки (дата и значение)")
+        
+        # Создаем информацию о датасете без создания дополнительных копий данных
+        missing_values = {col: int(df[col].isna().sum()) for col in df.columns}
         info = DatasetInfo(
             rows=len(df),
             columns=len(df.columns),
             column_names=df.columns.tolist(),
-            missing_values={col: int(df[col].isna().sum()) for col in df.columns}
+            missing_values=missing_values
         )
         
         logger.info(f"Файл успешно загружен: {len(df)} строк, {len(df.columns)} колонок")
@@ -59,8 +81,14 @@ def process_uploaded_file(file_path: str, chunk_size: int = 100000) -> Tuple[pd.
     except pd.errors.ParserError as e:
         logger.error(f"Ошибка парсинга: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Ошибка чтения файла: {str(e)}")
+    except MemoryError:
+        logger.error("Недостаточно памяти для загрузки файла")
+        raise HTTPException(status_code=507, 
+                           detail=f"Недостаточно памяти для загрузки файла размером {file_size_mb:.2f} МБ. Попробуйте разделить файл на более мелкие части.")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {str(e)}")
+        # Сохраняем подробный стек ошибки для диагностики
+        logger.error(f"Критическая ошибка при обработке файла: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка загрузки: {str(e)}")
 
 
@@ -82,18 +110,40 @@ def load_csv_standard(file_path: str) -> pd.DataFrame:
         else:
             sep = None  # Автоопределение pandas
         
-        # Чтение файла
-        if sep is None:
-            df = pd.read_csv(file_path, sep=None, engine='python', thousands=' ')
-        else:
-            df = pd.read_csv(file_path, sep=sep, thousands=' ')
+        # Пробуем определить кодировку
+        encodings = ['utf-8', 'latin1', 'cp1251', 'ISO-8859-1']
+        
+        for encoding in encodings:
+            try:
+                # Чтение файла с определенной кодировкой
+                if sep is None:
+                    df = pd.read_csv(file_path, sep=None, engine='python', 
+                                     encoding=encoding, errors='replace', thousands=' ',
+                                     memory_map=True, low_memory=True)
+                else:
+                    df = pd.read_csv(file_path, sep=sep, encoding=encoding, 
+                                    errors='replace', thousands=' ',
+                                    memory_map=True, low_memory=True)
+                
+                # Если дошли до этого места, значит чтение успешно
+                logger.info(f"Файл прочитан с кодировкой {encoding}")
+                break
+            except UnicodeDecodeError:
+                if encoding == encodings[-1]:  # Последняя попытка
+                    logger.error("Не удалось определить кодировку файла")
+                    raise
+                continue
+            except Exception as e:
+                logger.error(f"Ошибка при чтении с кодировкой {encoding}: {str(e)}")
+                raise
         
         if df.shape[1] == 1:
-            logger.warning("Автоопределение разделителя нашло только 1 столбец")
+            logger.warning("Автоопределение разделителя нашло только 1 столбец. Возможно неправильно определен разделитель.")
         
         return df
     except Exception as e:
         logger.error(f"Ошибка при стандартной загрузке CSV: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
 
 
@@ -115,30 +165,91 @@ def load_csv_in_chunks(file_path: str, chunk_size: int) -> pd.DataFrame:
         else:
             sep = None  # Автоопределение pandas
         
-        # Чтение по частям
+        # Определение кодировки
+        encodings = ['utf-8', 'latin1', 'cp1251', 'ISO-8859-1']
+        encoding_to_use = 'utf-8'  # По умолчанию
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    f.read(4096)
+                encoding_to_use = encoding
+                break
+            except UnicodeDecodeError:
+                continue
+        
+        logger.info(f"Используется кодировка {encoding_to_use} для чтения по частям")
+        
+        # Чтение по частям с мониторингом памяти
         chunks = []
+        total_rows = 0
         chunk_iter = pd.read_csv(
             file_path, 
             sep=sep if sep else ',',  # Используем определенный разделитель или запятую по умолчанию
             engine='python' if sep is None else 'c',
             chunksize=chunk_size, 
-            encoding='utf-8', 
+            encoding=encoding_to_use, 
             errors='replace',
             thousands=' ',
-            low_memory=True
+            low_memory=True,
+            memory_map=True,  # Использование mmap для снижения нагрузки на память
+            dtype_backend='numpy_nullable'  # Использование более эффективных типов данных
         )
         
+        import gc
         for i, chunk in enumerate(chunk_iter):
+            # Оптимизация типов данных для экономии памяти
+            for col in chunk.select_dtypes(include=['float64']).columns:
+                # Пробуем конвертировать float64 в float32, если диапазон позволяет
+                if chunk[col].min() >= -3.4e38 and chunk[col].max() <= 3.4e38:
+                    chunk[col] = chunk[col].astype('float32')
+            
+            for col in chunk.select_dtypes(include=['int64']).columns:
+                # Пробуем конвертировать int64 в более компактные типы
+                if chunk[col].min() >= -32768 and chunk[col].max() <= 32767:
+                    chunk[col] = chunk[col].astype('int16')
+                elif chunk[col].min() >= -2147483648 and chunk[col].max() <= 2147483647:
+                    chunk[col] = chunk[col].astype('int32')
+            
             chunks.append(chunk)
-            logger.info(f"Загружен чанк {i+1}, строк: {len(chunk)}")
+            total_rows += len(chunk)
+            logger.info(f"Загружен чанк {i+1}, строк: {len(chunk)}, всего строк: {total_rows}")
+            
+            # Принудительно вызываем сборщик мусора после каждого чанка
+            gc.collect()
         
-        # Объединяем чанки
-        df = pd.concat(chunks, ignore_index=True)
+        # Проверяем, есть ли данные
+        if not chunks:
+            logger.error("CSV файл не содержит данных")
+            raise ValueError("CSV файл не содержит данных")
+        
+        # Объединяем чанки с оптимизацией памяти
+        logger.info(f"Объединение {len(chunks)} чанков")
+        try:
+            # Пробуем использовать pandas concat
+            df = pd.concat(chunks, ignore_index=True, copy=False)
+        except MemoryError:
+            # При нехватке памяти пробуем альтернативный подход
+            logger.warning("Недостаточно памяти для стандартного объединения, пробуем альтернативный метод")
+            # Сохраняем первый чанк как базу
+            df = chunks[0]
+            # Добавляем остальные чанки по очереди
+            for i, chunk in enumerate(chunks[1:], 1):
+                df = pd.concat([df, chunk], ignore_index=True, copy=False)
+                # Удаляем использованный чанк для освобождения памяти
+                chunks[i] = None
+                gc.collect()
+        
         logger.info(f"Успешно загружен большой CSV по частям. Всего строк: {len(df)}")
         
         return df
+    except MemoryError as e:
+        logger.error(f"Недостаточно памяти при загрузке CSV: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise MemoryError(f"Недостаточно памяти для загрузки файла. Попробуйте использовать меньший размер чанка или разделить файл.")
     except Exception as e:
         logger.error(f"Ошибка при загрузке CSV чанками: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
 
 
@@ -158,18 +269,42 @@ def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, tar
     Returns:
         Датафрейм с переименованными колонками для AutoGluon и правильной частотой
     """
+    import gc
+    
     # Проверяем наличие необходимых колонок
     required_cols = [id_col, timestamp_col, target_col]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(f"Отсутствуют необходимые колонки: {', '.join(missing_cols)}")
     
-    # Создаем копию датафрейма
-    df_local = df.copy()
+    # Создаем копию только необходимых колонок для экономии памяти
+    cols_to_keep = [id_col, timestamp_col, target_col]
+    # Добавляем другие колонки, которые могут быть полезны для анализа
+    extra_cols = [col for col in df.columns if col not in [id_col, timestamp_col, target_col]]
+    cols_to_keep.extend(extra_cols)
+    
+    df_local = df[cols_to_keep].copy(deep=False)  # Используем shallow copy
     
     # Убедимся, что колонка с датами имеет правильный тип
     if not pd.api.types.is_datetime64_any_dtype(df_local[timestamp_col]):
-        df_local[timestamp_col] = pd.to_datetime(df_local[timestamp_col], errors="coerce")
+        try:
+            df_local[timestamp_col] = pd.to_datetime(df_local[timestamp_col], errors="coerce")
+        except Exception as e:
+            logger.error(f"Ошибка преобразования даты: {str(e)}")
+            raise ValueError(f"Не удалось преобразовать колонку {timestamp_col} в тип datetime: {str(e)}") 
+    
+    # Проверяем на наличие NaT в колонке с датами
+    if df_local[timestamp_col].isna().any():
+        na_count = df_local[timestamp_col].isna().sum()
+        logger.warning(f"Обнаружены пропущенные значения в колонке даты ({na_count} шт.). Эти строки будут удалены.")
+        df_local = df_local.dropna(subset=[timestamp_col])
+    
+    # Проверка на дубликаты дат для каждого ID
+    duplicate_mask = df_local.duplicated(subset=[id_col, timestamp_col], keep='first')
+    if duplicate_mask.any():
+        dup_count = duplicate_mask.sum()
+        logger.warning(f"Обнаружены дубликаты дат для ID ({dup_count} шт.). Сохраняем только первые значения.")
+        df_local = df_local.drop_duplicates(subset=[id_col, timestamp_col], keep='first')
     
     # Преобразуем item_id в строку
     df_local[id_col] = df_local[id_col].astype(str)
@@ -189,77 +324,121 @@ def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, tar
     # Применяем переименование
     df_local = df_local.rename(columns=column_mapping)
     
+    # Принудительно вызываем сборщик мусора
+    gc.collect()
+    
     # Определяем начальные и конечные даты для каждого временного ряда
-    if freq:
+    if freq and df_local['item_id'].nunique() <= 1000:  # Ограничиваем для предотвращения excessive memory usage
         # Преобразуем в мультииндекс для упрощения работы с временными рядами
         df_local = df_local.set_index(["item_id", "timestamp"])
     
         # Для каждого ID выполняем преобразование частоты
         result_pieces = []
-        for item_id, group in df_local.groupby("item_id", as_index=False):
-            # Определяем дату начала и конца для конкретного ряда
-            start_date = group.index.get_level_values("timestamp").min()
-            end_date = group.index.get_level_values("timestamp").max()
-            
-            # Создаем регулярный временной индекс
-            if freq in ["D", "B", "H", "min", "T", "S"]:
-                # Для дней, рабочих дней, часов, минут, секунд
-                idx = pd.date_range(start=start_date, end=end_date, freq=freq)
-            elif freq in ["M", "MS"]:
-                # Для месяцев
-                idx = pd.date_range(start=start_date.replace(day=1), 
-                                    end=end_date + pd.offsets.MonthEnd(0), 
-                                    freq=freq)
-            elif freq in ["Q", "QS"]:
-                # Для кварталов
-                idx = pd.date_range(start=start_date.replace(day=1), 
-                                    end=end_date + pd.offsets.QuarterEnd(0), 
-                                    freq=freq)
-            elif freq in ["Y", "YS"]:
-                # Для годов
-                idx = pd.date_range(start=start_date.replace(month=1, day=1), 
-                                    end=end_date + pd.offsets.YearEnd(0), 
-                                    freq=freq)
-            else:
-                # Для других частот используем стандартный date_range
-                idx = pd.date_range(start=start_date, end=end_date, freq=freq)
-            
-            # Создаем полный мультииндекс для данного ID
-            multi_idx = pd.MultiIndex.from_product([[item_id], idx], names=["item_id", "timestamp"])
-            
-            # Переиндексируем данные группы
-            piece = group.reindex(multi_idx)
-            
-            # Заполняем пропуски
-            if fill_method == "ffill":
-                piece = piece.fillna(method="ffill").fillna(method="bfill")
-            elif fill_method == "linear":
-                piece = piece.interpolate(method="linear")
-            elif fill_method == "zero":
-                piece = piece.fillna(0)
-            
-            result_pieces.append(piece)
+        unique_ids = df_local.index.get_level_values("item_id").unique()
+        
+        # Предупреждение при большом количестве временных рядов
+        if len(unique_ids) > 100:
+            logger.warning(
+                f"Большое количество временных рядов ({len(unique_ids)}). " +
+                "Преобразование частоты может занять длительное время."
+            )
+        
+        for idx, item_id in enumerate(unique_ids):
+            try:
+                # Определяем дату начала и конца для конкретного ряда
+                group = df_local.loc[item_id]
+                start_date = group.index.min()
+                end_date = group.index.max()
+                
+                # Создаем регулярный временной индекс в зависимости от частоты
+                try:
+                    if freq in ["D", "B", "H", "min", "T", "S"]:
+                        # Для дней, рабочих дней, часов, минут, секунд
+                        idx = pd.date_range(start=start_date, end=end_date, freq=freq)
+                    elif freq in ["M", "MS"]:
+                        # Для месяцев
+                        idx = pd.date_range(start=start_date.replace(day=1), 
+                                            end=end_date + pd.offsets.MonthEnd(0), 
+                                            freq=freq)
+                    elif freq in ["Q", "QS"]:
+                        # Для кварталов
+                        idx = pd.date_range(start=start_date.replace(day=1), 
+                                            end=end_date + pd.offsets.QuarterEnd(0), 
+                                            freq=freq)
+                    elif freq in ["Y", "YS"]:
+                        # Для годов
+                        idx = pd.date_range(start=start_date.replace(month=1, day=1), 
+                                            end=end_date + pd.offsets.YearEnd(0), 
+                                            freq=freq)
+                    else:
+                        # Для других частот используем стандартный date_range
+                        idx = pd.date_range(start=start_date, end=end_date, freq=freq)
+                except Exception as e:
+                    logger.error(f"Ошибка при создании временного индекса для {item_id}: {str(e)}")
+                    # Используем исходные даты в качестве резервного варианта
+                    idx = group.index
+                
+                # Создаем полный мультииндекс для данного ID
+                multi_idx = pd.MultiIndex.from_product([[item_id], idx], names=["item_id", "timestamp"])
+                
+                # Переиндексируем данные группы
+                piece = group.reindex(idx)
+                piece.index = multi_idx
+                
+                # Заполняем пропуски в зависимости от метода
+                if fill_method == "ffill":
+                    piece = piece.fillna(method="ffill")
+                    # Дополнительно заполняем значения в начале ряда методом bfill, если они пропущены
+                    piece = piece.fillna(method="bfill")
+                elif fill_method == "linear":
+                    for col in piece.columns:
+                        if pd.api.types.is_numeric_dtype(piece[col]):
+                            piece[col] = piece[col].interpolate(method="linear")
+                elif fill_method == "zero":
+                    piece = piece.fillna(0)
+                
+                result_pieces.append(piece)
+                
+                # Логирование прогресса
+                if (idx + 1) % 100 == 0 or idx == len(unique_ids) - 1:
+                    logger.info(f"Обработано {idx + 1}/{len(unique_ids)} временных рядов")
+                
+                # Периодически вызываем сборщик мусора при большом количестве рядов
+                if (idx + 1) % 500 == 0:
+                    gc.collect()
+                
+            except Exception as e:
+                logger.error(f"Ошибка при обработке временного ряда {item_id}: {str(e)}")
+                logger.error(traceback.format_exc())
+                # Пропускаем проблемный ряд и продолжаем с остальными
+                continue
         
         # Собираем все кусочки вместе
         if result_pieces:
-            df_local = pd.concat(result_pieces)
-            # Сбрасываем индекс
-            df_local = df_local.reset_index()
+            try:
+                df_local = pd.concat(result_pieces)
+                # Принудительная сборка мусора после объединения
+                gc.collect()
+                # Сбрасываем индекс
+                df_local = df_local.reset_index()
+            except MemoryError:
+                logger.error("Недостаточно памяти при объединении временных рядов")
+                # Альтернативный подход при нехватке памяти
+                df_base = result_pieces[0]
+                for piece in result_pieces[1:]:
+                    df_base = pd.concat([df_base, piece])
+                    gc.collect()
+                df_local = df_base.reset_index()
         else:
-            df_local = pd.DataFrame(columns=["item_id", "timestamp", "target"] + unchanged_cols)
+            logger.warning("Не удалось обработать ни один временной ряд. Возвращаем исходные данные.")
+            # Восстанавливаем исходные данные
+            df_local = df[cols_to_keep].copy()
+            df_local = df_local.rename(columns=column_mapping)
+            # Убедимся, что колонка с датами имеет правильный тип
+            if not pd.api.types.is_datetime64_any_dtype(df_local["timestamp"]):
+                df_local["timestamp"] = pd.to_datetime(df_local["timestamp"], errors="coerce")
     
-    # Сортируем по ID и дате
-    df_local = df_local.sort_values(["item_id", "timestamp"]).reset_index(drop=True)
-    
-    # Проверяем, что необходимые колонки созданы
-    for new_col in ["item_id", "timestamp", "target"]:
-        if new_col not in df_local.columns:
-            raise ValueError(f"Не удалось создать колонку '{new_col}'")
-    
-    # Логируем информацию
-    freq_str = freq if freq else "определена автоматически"
-    logger.info(f"Преобразовано в TimeSeriesDataFrame формат с частотой {freq_str}. Колонки: {list(df_local.columns)}")
-    
+    logger.info(f"Преобразование в формат временных рядов завершено. Строк: {len(df_local)}")
     return df_local
 
 

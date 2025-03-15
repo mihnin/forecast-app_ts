@@ -6,6 +6,7 @@ import os
 import uuid
 import json
 import logging
+import traceback  # Для подробного логирования ошибок
 from app.models.data import DataResponse, DataAnalysisRequest, DataAnalysisResponse, ColumnSelection
 from app.services.data.data_processing import process_uploaded_file
 from app.services.data.data_validation import validate_dataset
@@ -44,38 +45,141 @@ async def upload_data(
     """
     Загрузка файла с данными для анализа и прогнозирования
     """
+    file_path = None
     try:
-        # Проверяем, что файл существует
+        # Проверяем, что файл существует и не пустой
         if not file or not file.filename:
+            logger.error("Файл не был загружен или имеет пустое имя")
             raise HTTPException(
                 status_code=400,
-                detail="Файл не был загружен"
+                detail="Файл не был загружен или имеет пустое имя"
             )
+        
+        # Проверяем размер файла
+        try:
+            # Сначала проверяем, доступен ли размер файла
+            if hasattr(file, 'size'):
+                file_size = file.size
+            else:
+                # Если размер не доступен напрямую, читаем кусок и проверяем позицию
+                await file.seek(0)
+                chunk = await file.read(8192)
+                file_size = 8192 if chunk else 0
+                await file.seek(0)  # Возвращаем указатель в начало
+            
+            # Проверяем, что файл не пустой
+            if file_size == 0:
+                logger.error("Загружен пустой файл")
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Загружен пустой файл"
+                )
+            
+            logger.info(f"Загрузка файла: {file.filename}, размер: {file_size} байт")
+        except Exception as e:
+            logger.error(f"Ошибка при проверке размера файла: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Если не можем проверить размер, продолжаем, но логируем предупреждение
+            logger.warning("Не удалось проверить размер файла, продолжаем обработку")
 
         # Очищаем старые файлы перед загрузкой нового
         clean_old_files("data")
         
         # Безопасно сохраняем файл
+        logger.info(f"Сохранение загруженного файла {file.filename}")
         file_path, safe_filename = await save_upload_file(file, "data")
+        logger.info(f"Файл сохранен как {safe_filename} по пути {file_path}")
         
         # Обрабатываем файл
         try:
+            logger.info(f"Начало обработки файла {file_path}")
             df, info = process_uploaded_file(file_path, chunk_size)
+            logger.info(f"Успешная обработка файла: {len(df)} строк, {len(df.columns)} колонок")
+        except MemoryError as e:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Недостаточно памяти для обработки файла: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=507,  # Insufficient Storage
+                detail=f"Недостаточно памяти для обработки файла. Попробуйте разделить файл на меньшие части или увеличить доступную память."
+            )
+        except pd.errors.ParserError as e:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Ошибка при парсинге файла: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Файл имеет неверный формат или структуру данных: {str(e)}"
+            )
+        except ValueError as e:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Ошибка валидации данных: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ошибка в данных: {str(e)}"
+            )
         except Exception as e:
             if os.path.exists(file_path):
                 os.remove(file_path)
             logger.error(f"Ошибка при обработке файла: {str(e)}")
-            raise HTTPException(status_code=400, detail=f"Ошибка при обработке файла: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ошибка при обработке файла: {str(e)}"
+            )
         
+        # Базовая валидация данных
+        if df.empty:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error("Загружен пустой датасет")
+            raise HTTPException(
+                status_code=400,
+                detail="Загруженный файл не содержит данных или формат не поддерживается"
+            )
+        
+        # Проверка наличия хотя бы одной числовой колонки
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        if len(numeric_cols) == 0:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error("Датасет не содержит числовых колонок")
+            raise HTTPException(
+                status_code=400,
+                detail="Файл должен содержать хотя бы одну числовую колонку для анализа временных рядов"
+            )
+
+        # Проверка наличия колонки с датами
+        date_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col]) 
+                    or (pd.to_datetime(df[col], errors='coerce').notna().sum() > 0.7 * len(df))]
+        if not date_cols:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error("Не найдены колонки с датами")
+            raise HTTPException(
+                status_code=400,
+                detail="Файл должен содержать колонку с датами для анализа временных рядов"
+            )
+            
         # Сохраняем информацию в базу данных
         try:
+            logger.info(f"Сохранение информации о датасете в базу данных")
             data_service = DataService(db)
             dataset = data_service.create_dataset(file_path, safe_filename, df)
+            logger.info(f"Датасет сохранен с ID: {dataset.id}")
         except Exception as e:
             if os.path.exists(file_path):
                 os.remove(file_path)
             logger.error(f"Ошибка при сохранении в базу данных: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении данных: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ошибка при сохранении данных в базу: {str(e)}"
+            )
         
         # Формируем ответ
         response = DataResponse(
@@ -85,6 +189,7 @@ async def upload_data(
             info=info
         )
         
+        logger.info(f"Файл успешно загружен и обработан, присвоен ID: {dataset.id}")
         return JSONResponse(
             status_code=200,
             content=response.dict(),
@@ -97,10 +202,19 @@ async def upload_data(
         )
     
     except HTTPException:
+        # Повторно логируем исключение для диагностики
+        logger.error(f"HTTP исключение при загрузке файла: {traceback.format_exc()}")
         raise
     except Exception as e:
-        logger.error(f"Неожиданная ошибка при загрузке файла: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Неожиданная ошибка при загрузке файла: {str(e)}")
+        # Удаляем файл при необработанной ошибке
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        logger.error(f"Необработанная ошибка при загрузке файла: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Внутренняя ошибка сервера: {str(e)}"
+        )
 
 
 @router.post("/analyze", response_model=DataAnalysisResponse)
