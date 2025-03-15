@@ -65,19 +65,10 @@ const TimeSeriesChart = ({
   const [dateFormat, setDateFormat] = useState('day');
   const [showActualValues, setShowActualValues] = useState(true);
 
-  // Проверка наличия данных
-  if (!data || !data.timestamps) {
-    return (
-      <Card>
-        <Empty description="Нет данных для построения графика" />
-      </Card>
-    );
-  }
-
   // Получение доступных квантилей из данных, если не указаны явно
   const quantileKeys = availableQuantiles || 
-    (data.quantiles ? Object.keys(data.quantiles).sort() : 
-    (typeof data['0.5'] !== 'undefined' ? ['0.5'] : []));
+    (data?.quantiles ? Object.keys(data.quantiles).sort() : 
+    (typeof data?.['0.5'] !== 'undefined' ? ['0.5'] : []));
 
   // Установка начального значения для selectedQuantiles, если необходимо
   useEffect(() => {
@@ -90,7 +81,16 @@ const TimeSeriesChart = ({
         setSelectedQuantiles([quantileKeys[0]]);
       }
     }
-  }, [quantileKeys]);
+  }, [quantileKeys, selectedQuantiles]);
+
+  // Проверка наличия данных
+  if (!data || !data.timestamps) {
+    return (
+      <Card>
+        <Empty description="Нет данных для построения графика" />
+      </Card>
+    );
+  }
 
   // Форматирование меток времени в зависимости от выбранного формата
   const formatTimestamp = (timestamp) => {

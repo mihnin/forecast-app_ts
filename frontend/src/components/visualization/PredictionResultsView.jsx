@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Card, 
   Tabs, 
@@ -42,6 +42,16 @@ const PredictionResultsView = ({ predictionResult, onDownload }) => {
   const [showConfidenceInterval, setShowConfidenceInterval] = useState(true);
   const [selectedQuantiles, setSelectedQuantiles] = useState(['0.5']);
 
+  // Установка первой серии как выбранной, если еще не выбрана
+  useEffect(() => {
+    if (!selectedSeries && predictionResult?.plots) {
+      const firstSeriesKey = Object.keys(predictionResult.plots).find(k => k !== 'metadata');
+      if (firstSeriesKey) {
+        setSelectedSeries(firstSeriesKey);
+      }
+    }
+  }, [predictionResult, selectedSeries]);
+
   // Проверка наличия данных
   if (!predictionResult || !predictionResult.predictions || !predictionResult.plots) {
     return (
@@ -53,16 +63,6 @@ const PredictionResultsView = ({ predictionResult, onDownload }) => {
       </Card>
     );
   }
-
-  // Установка первой серии как выбранной, если еще не выбрана
-  React.useEffect(() => {
-    if (!selectedSeries && predictionResult.plots) {
-      const firstSeriesKey = Object.keys(predictionResult.plots).find(k => k !== 'metadata');
-      if (firstSeriesKey) {
-        setSelectedSeries(firstSeriesKey);
-      }
-    }
-  }, [predictionResult, selectedSeries]);
 
   // Список серий временных рядов для выбора
   const seriesList = predictionResult.plots ? 

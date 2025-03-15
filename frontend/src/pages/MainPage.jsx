@@ -44,7 +44,8 @@ import {
   InfoCircleOutlined,
   FileZipOutlined,
   ClockCircleOutlined,
-  SyncOutlined
+  SyncOutlined,
+  DownloadOutlined
 } from '@ant-design/icons';
 import { useQuery } from 'react-query';
 import { dataService, trainingService } from '../services/api';
