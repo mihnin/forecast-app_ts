@@ -8,6 +8,30 @@ const api = axios.create({
   },
 });
 
+// Настраиваем перехватчик для обработки ошибок
+api.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response) {
+      // Серверная ошибка
+      switch (error.response.status) {
+        case 405:
+          console.error('Method Not Allowed: Проверьте настройки CORS и метод запроса');
+          break;
+        case 413:
+          console.error('Payload Too Large: Файл слишком большой');
+          break;
+        case 415:
+          console.error('Unsupported Media Type: Неподдерживаемый формат файла');
+          break;
+        default:
+          console.error('Server Error:', error.response.data);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Сервис для работы с данными
 export const dataService = {
   // Загрузка файла с данными
@@ -23,10 +47,24 @@ export const dataService = {
       params: {
         chunk_size: chunkSize,
       },
+      // Добавляем настройки для обработки timeout и повторных попыток
+      timeout: 30000,
+      retry: 3,
+      retryDelay: 1000,
     };
     
-    const response = await api.post('/data/upload', formData, config);
-    return response.data;
+    try {
+      const response = await api.post('/data/upload', formData, config);
+      return response.data;
+    } catch (error) {
+      if (error.response && error.response.status === 405) {
+        // Если получили 405, пробуем отправить предварительный OPTIONS запрос
+        await api.options('/data/upload');
+        // Повторяем основной запрос
+        return (await api.post('/data/upload', formData, config)).data;
+      }
+      throw error;
+    }
   },
   
   // Получение списка колонок датасета

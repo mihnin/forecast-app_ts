@@ -15,9 +15,25 @@ from app.core.queue import JobQueue
 from app.core.database import get_db
 from sqlalchemy.orm import Session
 from app.utils.file_utils import save_upload_file, clean_old_files
+from fastapi.middleware.cors import CORSMiddleware
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+@router.options("/upload")
+async def upload_options():
+    """
+    Обработка OPTIONS-запроса для загрузки файлов
+    """
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Content-Length",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
 
 @router.post("/upload", response_model=DataResponse)
 async def upload_data(
@@ -46,7 +62,6 @@ async def upload_data(
         try:
             df, info = process_uploaded_file(file_path, chunk_size)
         except Exception as e:
-            # Если произошла ошибка при обработке, удаляем загруженный файл
             if os.path.exists(file_path):
                 os.remove(file_path)
             logger.error(f"Ошибка при обработке файла: {str(e)}")
@@ -57,7 +72,6 @@ async def upload_data(
             data_service = DataService(db)
             dataset = data_service.create_dataset(file_path, safe_filename, df)
         except Exception as e:
-            # Если произошла ошибка при сохранении в БД, удаляем загруженный файл
             if os.path.exists(file_path):
                 os.remove(file_path)
             logger.error(f"Ошибка при сохранении в базу данных: {str(e)}")
@@ -77,7 +91,8 @@ async def upload_data(
             headers={
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type"
+                "Access-Control-Allow-Headers": "Content-Type, Content-Length",
+                "Access-Control-Max-Age": "86400",
             }
         )
     
