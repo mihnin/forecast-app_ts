@@ -15,6 +15,7 @@ import Prediction from './pages/Prediction';
 import PredictionResults from './pages/PredictionResults';
 import ModelComparison from './pages/ModelComparison';
 import QueueStatus from './pages/QueueStatus';
+import DataCleanup from './pages/DataCleanup'; // Используем страницу вместо компонента
 import NotFound from './pages/NotFound';
 
 const { Content } = Layout;
@@ -49,6 +50,7 @@ function App() {
                   <Route path="/prediction/results/:taskId" element={<PredictionResults />} />
                   <Route path="/models" element={<ModelComparison />} />
                   <Route path="/queue" element={<QueueStatus />} />
+                  <Route path="/cleanup" element={<DataCleanup />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Content>

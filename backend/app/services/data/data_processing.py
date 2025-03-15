@@ -41,13 +41,43 @@ def process_uploaded_file(file_path: str, chunk_size: int = 100000) -> Tuple[pd.
             if file_size_mb > 100:
                 logger.warning("Большие Excel-файлы могут загружаться медленно")
             try:
-                # Более безопасное чтение Excel-файлов с отключенным преобразованием типов
-                df = pd.read_excel(file_path, engine='openpyxl', 
-                                   dtype_backend='numpy_nullable')
-            except ImportError:
-                # Если openpyxl не доступен, используем xlrd
-                logger.warning("openpyxl не установлен, используем стандартный механизм чтения Excel")
-                df = pd.read_excel(file_path)
+                # Попытка чтения с использованием openpyxl для xlsx или xlrd для xls
+                engine = 'openpyxl' if file_ext == '.xlsx' else 'xlrd'
+                logger.info(f"Попытка чтения Excel-файла с использованием движка {engine}")
+                
+                # Проверяем поддержку pandas версии ≥ 2.0 с параметром dtype_backend
+                try:
+                    # Пробуем использовать современные параметры pandas
+                    df = pd.read_excel(
+                        file_path, 
+                        engine=engine,
+                        dtype_backend='numpy_nullable'
+                    )
+                except TypeError:
+                    # Если параметр не поддерживается (pandas < 2.0), используем базовый вызов
+                    logger.info("Версия pandas не поддерживает dtype_backend, используем базовый метод")
+                    df = pd.read_excel(file_path, engine=engine)
+                
+                logger.info(f"Excel-файл успешно прочитан, получено {len(df)} строк")
+                
+                # Проверка на правильность чтения данных
+                if len(df.columns) <= 1:
+                    logger.warning(f"Файл прочитан, но содержит только {len(df.columns)} колонок, что подозрительно")
+                
+            except ImportError as e:
+                # Если нужная библиотека не установлена
+                logger.warning(f"Библиотека {engine} не установлена: {str(e)}. Пробуем альтернативный метод чтения Excel.")
+                try:
+                    # Пробуем использовать любой доступный движок
+                    df = pd.read_excel(file_path)
+                    logger.info("Excel-файл успешно прочитан с использованием стандартного механизма")
+                except Exception as inner_e:
+                    logger.error(f"Не удалось прочитать Excel-файл: {str(inner_e)}")
+                    raise ValueError(f"Ошибка при чтении Excel-файла. Убедитесь, что установлены пакеты openpyxl и xlrd: {str(inner_e)}")
+            except Exception as e:
+                logger.error(f"Ошибка при чтении Excel-файла: {str(e)}")
+                logger.error(traceback.format_exc())
+                raise HTTPException(status_code=400, detail=f"Не удалось прочитать Excel-файл: {str(e)}")
         else:
             logger.error(f"Неподдерживаемый формат файла: {file_ext}")
             raise HTTPException(status_code=400, detail=f"Неподдерживаемый формат файла: {file_ext}")

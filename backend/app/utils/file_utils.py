@@ -54,8 +54,36 @@ def validate_file_content(file_path: str) -> bool:
         bool: True если файл корректен, иначе False
     """
     try:
+        # Определяем тип файла по расширению
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
         # Пробуем прочитать файл как pandas DataFrame
-        df = pd.read_csv(file_path) if file_path.endswith('.csv') else pd.read_excel(file_path)
+        if file_ext == '.csv':
+            # Для CSV используем стандартный метод
+            df = pd.read_csv(file_path)
+        elif file_ext in ['.xls', '.xlsx']:
+            # Для Excel-файлов используем специфичный подход
+            try:
+                # Пытаемся определить оптимальный движок
+                engine = 'openpyxl' if file_ext == '.xlsx' else 'xlrd'
+                try:
+                    df = pd.read_excel(file_path, engine=engine)
+                except ImportError:
+                    # Если указанный движок недоступен
+                    logger.warning(f"Библиотека {engine} не найдена, используем стандартный механизм чтения Excel")
+                    df = pd.read_excel(file_path)
+            except Exception as e:
+                logger.error(f"Ошибка при чтении Excel-файла: {str(e)}")
+                # Проверяем, связана ли ошибка с защитой паролем
+                error_msg = str(e).lower()
+                if "password" in error_msg or "protected" in error_msg:
+                    raise ValueError("Excel-файл защищен паролем. Пожалуйста, разблокируйте файл перед загрузкой.")
+                elif "corrupt" in error_msg:
+                    raise ValueError("Excel-файл поврежден. Пожалуйста, проверьте целостность файла.")
+                else:
+                    raise ValueError(f"Не удалось прочитать Excel-файл: {str(e)}")
+        else:
+            raise ValueError(f"Неподдерживаемый формат файла: {file_ext}")
         
         # Проверяем базовые требования к данным
         if len(df.columns) < 2:  # Минимум 2 колонки (дата и значение)
@@ -63,8 +91,34 @@ def validate_file_content(file_path: str) -> bool:
         
         if len(df) < 10:  # Минимум 10 строк для анализа
             raise ValueError("Файл должен содержать минимум 10 строк данных")
+        
+        # Проверка на наличие хотя бы одной колонки, которая может быть преобразована в даты
+        date_convertible = False
+        for col in df.columns:
+            try:
+                # Пробуем преобразовать в даты первые несколько строк
+                sample = df[col].head(10)
+                converted = pd.to_datetime(sample, errors='coerce')
+                # Если больше 70% значений успешно преобразовались, считаем колонку датой
+                if converted.notna().mean() >= 0.7:
+                    date_convertible = True
+                    break
+            except:
+                continue
+        
+        if not date_convertible:
+            logger.warning("В файле не найдено колонок, которые можно интерпретировать как даты")
+            # Не вызываем ошибку здесь, это только предупреждение
+        
+        # Проверка на наличие хотя бы одной числовой колонки
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        if len(numeric_cols) == 0:
+            raise ValueError("Файл должен содержать хотя бы одну числовую колонку для анализа временных рядов")
             
         return True
+    except ValueError as e:
+        logger.error(f"Ошибка валидации содержимого файла: {str(e)}")
+        raise
     except Exception as e:
         logger.error(f"Ошибка при проверке содержимого файла: {str(e)}")
         return False

@@ -8,7 +8,8 @@ import {
   LineChartOutlined,
   HourglassOutlined,
   AppstoreOutlined,
-  SettingOutlined
+  SettingOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -58,6 +59,11 @@ const Sidebar = () => {
       key: '/queue',
       icon: <HourglassOutlined />,
       label: <Link to="/queue">Статус задач</Link>
+    },
+    {
+      key: '/cleanup',
+      icon: <DeleteOutlined />,
+      label: <Link to="/cleanup">Очистка данных</Link>
     }
   ];
 

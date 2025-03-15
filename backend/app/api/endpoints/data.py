@@ -113,6 +113,32 @@ async def upload_data(
                 status_code=400,
                 detail=f"Файл имеет неверный формат или структуру данных: {str(e)}"
             )
+        except pd.errors.EmptyDataError as e:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Загруженный файл не содержит данных: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(
+                status_code=400,
+                detail="Загруженный файл не содержит данных"
+            )
+        except ImportError as e:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Отсутствуют необходимые библиотеки для чтения файла: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Проверяем, связан ли импорт с Excel-библиотеками
+            error_msg = str(e).lower()
+            if 'openpyxl' in error_msg or 'xlrd' in error_msg:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Отсутствуют необходимые библиотеки для чтения Excel-файлов. Установите пакеты openpyxl и xlrd."
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ошибка импорта библиотеки: {str(e)}"
+                )
         except ValueError as e:
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -127,10 +153,18 @@ async def upload_data(
                 os.remove(file_path)
             logger.error(f"Ошибка при обработке файла: {str(e)}")
             logger.error(traceback.format_exc())
-            raise HTTPException(
-                status_code=400,
-                detail=f"Ошибка при обработке файла: {str(e)}"
-            )
+            # Проверяем, связана ли ошибка с Excel-файлами
+            error_msg = str(e).lower()
+            if 'excel' in error_msg or 'xls' in error_msg or 'sheet' in error_msg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ошибка при обработке Excel-файла: {str(e)}. Возможно, файл поврежден или имеет неподдерживаемый формат."
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ошибка при обработке файла: {str(e)}"
+                )
         
         # Базовая валидация данных
         if df.empty:
