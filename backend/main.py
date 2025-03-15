@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.queue import JobQueue
+import logging
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Time Series Forecast API")
 
@@ -38,4 +41,8 @@ async def shutdown_event():
     Cleanup tasks on application shutdown
     """
     # Освобождение ресурсов при остановке
-    pass
+    try:
+        queue.cleanup()
+        logger.info("Ресурсы очереди освобождены")
+    except Exception as e:
+        logger.error(f"Ошибка при освобождении ресурсов: {str(e)}")

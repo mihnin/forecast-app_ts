@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import json
+from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.core.queue import JobQueue
 from app.services.forecasting.training import train_model

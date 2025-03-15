@@ -24,30 +24,7 @@ import {
   DashboardOutlined,
   CloudDownloadOutlined
 } from '@ant-design/icons';
-import { Line } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip as ChartTooltip,
-  Legend,
-  Filler
-} from 'chart.js';
-
-// Регистрируем компоненты Chart.js
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  ChartTooltip,
-  Legend,
-  Filler
-);
+import TimeSeriesChart from '../charts/TimeSeriesChart';
 
 const { Title: TitleTypography, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
@@ -188,69 +165,6 @@ const PredictionResultsView = ({ predictionResult, onDownload }) => {
     }
 
     return chartData;
-  };
-
-  // Настройки графика
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      tooltip: {
-        mode: 'index',
-        intersect: false,
-        callbacks: {
-          title: (tooltipItems) => {
-            const idx = tooltipItems[0].dataIndex;
-            return predictionResult.plots[selectedSeries]?.timestamps[idx] 
-              ? new Date(predictionResult.plots[selectedSeries].timestamps[idx]).toLocaleString('ru-RU')
-              : '';
-          },
-          label: (context) => {
-            const label = context.dataset.label || '';
-            let value = context.parsed.y;
-            if (value !== null && !isNaN(value)) {
-              value = value.toFixed(2);
-              return `${label}: ${value}`;
-            }
-            return null;
-          }
-        }
-      },
-      title: {
-        display: true,
-        text: `Прогноз для серии ${selectedSeries || ''}`,
-        font: {
-          size: 16
-        }
-      }
-    },
-    interaction: {
-      mode: 'nearest',
-      intersect: false,
-      axis: 'x'
-    },
-    scales: {
-      y: {
-        beginAtZero: false,
-        title: {
-          display: true,
-          text: 'Значение'
-        }
-      },
-      x: {
-        title: {
-          display: true,
-          text: 'Дата'
-        },
-        ticks: {
-          maxRotation: 45,
-          minRotation: 45
-        }
-      }
-    }
   };
 
   // Подготовка данных для таблицы
@@ -462,7 +376,13 @@ const PredictionResultsView = ({ predictionResult, onDownload }) => {
 
               <div style={{ height: 400 }}>
                 {selectedSeries ? (
-                  <Line data={getChartData()} options={chartOptions} />
+                  <TimeSeriesChart 
+                    data={getChartData()}
+                    title={`Прогноз для серии ${selectedSeries}`}
+                    seriesName={selectedSeries}
+                    availableQuantiles={predictionResult.plots.metadata?.quantiles}
+                    showForecastLine={true}
+                  />
                 ) : (
                   <Empty description="Выберите серию для отображения" />
                 )}

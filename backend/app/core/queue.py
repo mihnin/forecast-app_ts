@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 import redis
 from celery import Celery
 import uuid
@@ -214,13 +214,13 @@ class JobQueue:
         
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get information about a task by ID
+        Получение информации о задаче по ID
         
         Args:
-            task_id: ID of the task
+            task_id: ID задачи
             
         Returns:
-            Task information or None if task not found
+            Информация о задаче или None, если задача не найдена
         """
         task_data = self.redis.hget("tasks", task_id)
         if not task_data:
@@ -269,37 +269,46 @@ class JobQueue:
 
     def retry_task(self, task_id: str) -> bool:
         """
-        Retry a failed task
+        Повторная попытка выполнения неудавшейся задачи
         
         Args:
-            task_id: ID of the task
+            task_id: ID задачи
             
         Returns:
-            True if the task was added to the queue, otherwise False
+            True, если задача добавлена в очередь, иначе False
         """
+        if not task_id:
+            logger.error("Не указан ID задачи для повторной попытки")
+            return False
+            
         task_data = self.redis.hget("tasks", task_id)
         if not task_data:
+            logger.error(f"Задача с ID {task_id} не найдена")
             return False
             
         task_json = json.loads(task_data)
         if task_json["status"] != "failed":
+            logger.error(f"Задача с ID {task_id} не находится в состоянии 'failed' (текущий статус: {task_json['status']})")
             return False
         
-        # Update task state
+        # Обновляем состояние задачи
         task_json["status"] = "pending"
         task_json["updated_at"] = time.time()
         task_json["retry_count"] = task_json.get("retry_count", 0) + 1
         task_json["error"] = None
         
-        # Add task to queue
+        # Добавляем задачу в очередь
         self.redis.hset("tasks", task_id, json.dumps(task_json))
         self.redis.rpush("task_queue", task_id)
         
-        # Add log entry
+        # Логируем операцию
+        logger.info(f"Задача {task_id} добавлена для повторной попытки (попытка #{task_json['retry_count']})")
+        
+        # Добавляем запись в лог задачи
         self.add_task_log(
             task_id, 
             "INFO", 
-            f"Task added for retry (attempt #{task_json['retry_count']})"
+            f"Задача добавлена для повторного выполнения (попытка #{task_json['retry_count']})"
         )
         
         return True
@@ -343,10 +352,17 @@ class JobQueue:
 
     def get_queue_stats(self) -> Dict[str, Any]:
         """
-        Get queue statistics
+        Получение статистики очереди
         
         Returns:
-            Dictionary with queue statistics
+            Словарь со статистикой:
+            - total_tasks: общее количество задач
+            - pending_tasks: количество ожидающих задач
+            - executing_tasks: количество выполняемых задач
+            - completed_tasks: количество завершенных задач
+            - failed_tasks: количество неудавшихся задач
+            - average_waiting_time: среднее время ожидания (сек)
+            - average_execution_time: среднее время выполнения (сек)
         """
         tasks = self.get_all_tasks()
         
@@ -389,3 +405,14 @@ class JobQueue:
             "average_waiting_time": average_waiting_time,
             "average_execution_time": average_execution_time
         }
+    
+    def cleanup(self):
+        """
+        Освобождение ресурсов Redis при завершении работы
+        """
+        try:
+            # Закрытие соединения с Redis
+            self.redis.close()
+            logger.info("Соединение с Redis закрыто")
+        except Exception as e:
+            logger.error(f"Ошибка при закрытии соединения с Redis: {str(e)}")

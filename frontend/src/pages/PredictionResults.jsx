@@ -30,7 +30,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from 'react-query';
 import { predictionService } from '../services/api';
-import PredictionChart from '../components/charts/PredictionChart';
+import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 import Loading from '../components/common/Loading';
 import ErrorDisplay from '../components/common/ErrorDisplay';
 
@@ -367,10 +367,11 @@ const PredictionResults = () => {
             key="1"
           >
             {selectedSeries ? (
-              <PredictionChart 
+              <TimeSeriesChart 
                 data={getChartData()}
                 title={`Прогноз для серии ${selectedSeries}`}
                 seriesName={selectedSeries}
+                availableQuantiles={predictionResult.plots?.metadata?.quantiles}
               />
             ) : (
               <Empty description="Выберите серию для отображения" />
