@@ -6,7 +6,9 @@ import {
   BarChartOutlined,
   ExperimentOutlined,
   LineChartOutlined,
-  HourglassOutlined
+  HourglassOutlined,
+  AppstoreOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -20,7 +22,12 @@ const Sidebar = () => {
     {
       key: '/',
       icon: <HomeOutlined />,
-      label: <Link to="/">Обзор</Link>
+      label: <Link to="/">Главная (Wizard)</Link>
+    },
+    {
+      key: '/dashboard',
+      icon: <SettingOutlined />,
+      label: <Link to="/dashboard">Обзор системы</Link>
     },
     {
       key: '/upload',
@@ -36,6 +43,11 @@ const Sidebar = () => {
       key: '/training',
       icon: <ExperimentOutlined />,
       label: <Link to="/training">Обучение модели</Link>
+    },
+    {
+      key: '/models',
+      icon: <AppstoreOutlined />,
+      label: <Link to="/models">Сравнение моделей</Link>
     },
     {
       key: '/prediction',

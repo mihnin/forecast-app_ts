@@ -110,3 +110,70 @@ body {
     margin-right: 8px;
     margin-bottom: 8px;
   }
+
+/* Основные стили */
+.main-page .step-content {
+  min-height: 400px;
+  margin-bottom: 20px;
+}
+
+.main-page .ant-steps-item-title {
+  font-weight: 500;
+}
+
+.main-page .ant-steps-item-active .ant-steps-item-title {
+  font-weight: 600;
+}
+
+/* Стили для загрузчика файлов */
+.main-page .ant-upload-drag {
+  border: 2px dashed #d9d9d9;
+  transition: border-color 0.3s;
+}
+
+.main-page .ant-upload-drag:hover {
+  border-color: #1890ff;
+}
+
+.main-page .ant-upload-drag-icon .anticon {
+  color: #1890ff;
+  font-size: 48px;
+}
+
+/* Улучшенный вид карточек */
+.main-page .ant-card {
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s;
+}
+
+.main-page .ant-card:hover {
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Стили для графиков прогнозов */
+.prediction-chart {
+  position: relative;
+  height: 400px;
+  margin-bottom: 20px;
+}
+
+.prediction-chart .chart-overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 5px 10px;
+  border-radius: 4px;
+  z-index: 10;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 768px) {
+  .main-page .ant-steps-vertical {
+    height: auto;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+}

@@ -7,10 +7,13 @@ import Header from './components/layout/Header';
 import Footer from './components/layout/Footer';
 import Sidebar from './components/layout/Sidebar';
 import Dashboard from './pages/Dashboard';
+import MainPage from './pages/MainPage'; // Новая главная страница
 import DataUpload from './pages/DataUpload';
 import DataAnalysis from './pages/DataAnalysis';
 import ModelTraining from './pages/ModelTraining';
 import Prediction from './pages/Prediction';
+import PredictionResults from './pages/PredictionResults';
+import ModelComparison from './pages/ModelComparison';
 import QueueStatus from './pages/QueueStatus';
 import NotFound from './pages/NotFound';
 
@@ -37,11 +40,14 @@ function App() {
                 }}
               >
                 <Routes>
-                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/" element={<MainPage />} /> {/* Заменяем Dashboard на MainPage как главную страницу */}
+                  <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/upload" element={<DataUpload />} />
                   <Route path="/analysis" element={<DataAnalysis />} />
                   <Route path="/training" element={<ModelTraining />} />
                   <Route path="/prediction" element={<Prediction />} />
+                  <Route path="/prediction/results/:taskId" element={<PredictionResults />} />
+                  <Route path="/models" element={<ModelComparison />} />
                   <Route path="/queue" element={<QueueStatus />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
