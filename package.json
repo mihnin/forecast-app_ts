@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    // ...existing code...
+    "fix-deps": "node scripts/fix-dependencies.js",
+    "prepare-docker": "chmod +x scripts/update-deps.sh",
+    // ...existing code...
+  }
+}
