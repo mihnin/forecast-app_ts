@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import data, training, prediction, analysis, preprocessing
+from app.api.endpoints import data, training, prediction, analysis, preprocessing, queue
 
 api_router = APIRouter()
 
@@ -36,4 +36,11 @@ api_router.include_router(
     preprocessing.router,
     prefix="/preprocessing",
     tags=["preprocessing"]
+)
+
+# Queue management routes
+api_router.include_router(
+    queue.router,
+    prefix="/queue",
+    tags=["queue"]
 )

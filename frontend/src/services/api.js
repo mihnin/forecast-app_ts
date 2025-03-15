@@ -6,17 +6,51 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Добавляем настройки для CORS
+  withCredentials: false,
 });
+
+// Настраиваем перехватчик для запросов
+api.interceptors.request.use(
+  config => {
+    // Добавляем заголовки для всех запросов
+    config.headers = {
+      ...config.headers,
+      'Accept': 'application/json',
+    };
+    return config;
+  },
+  error => Promise.reject(error)
+);
 
 // Настраиваем перехватчик для обработки ошибок
 api.interceptors.response.use(
   response => response,
-  error => {
+  async error => {
     if (error.response) {
-      // Серверная ошибка
       switch (error.response.status) {
         case 405:
           console.error('Method Not Allowed: Проверьте настройки CORS и метод запроса');
+          // Для 405 ошибки пробуем отправить предварительный OPTIONS запрос
+          if (error.config && !error.config._retry) {
+            error.config._retry = true;
+            try {
+              // Отправляем OPTIONS запрос
+              await axios({
+                method: 'OPTIONS',
+                url: error.config.url,
+                baseURL: error.config.baseURL,
+                headers: {
+                  'Access-Control-Request-Method': error.config.method.toUpperCase(),
+                  'Access-Control-Request-Headers': 'content-type'
+                }
+              });
+              // Повторяем оригинальный запрос
+              return await axios(error.config);
+            } catch (e) {
+              return Promise.reject(e);
+            }
+          }
           break;
         case 413:
           console.error('Payload Too Large: Файл слишком большой');
