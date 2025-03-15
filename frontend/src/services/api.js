@@ -120,6 +120,7 @@ export const predictionService = {
 export const queueService = {
   // Получение статуса задачи
   getTaskStatus: async (taskId) => {
+    if (!taskId) return null;
     const response = await api.get(`/queue/status/${taskId}`);
     return response.data;
   },
@@ -129,6 +130,20 @@ export const queueService = {
     const response = await api.get('/queue/info');
     return response.data;
   },
+  
+  // Получение логов задачи
+  getTaskLogs: async (taskId, limit = 100) => {
+    const response = await api.get(`/queue/logs/${taskId}`, {
+      params: { limit }
+    });
+    return response.data;
+  },
+  
+  // Повторная попытка выполнения задачи
+  retryTask: async (taskId) => {
+    const response = await api.post(`/queue/retry/${taskId}`);
+    return response.data;
+  }
 };
 
 export default {
