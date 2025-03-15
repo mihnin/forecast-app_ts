@@ -14,8 +14,14 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = ENVIRONMENT == "development"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS - более безопасная конфигурация
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000"
+    ]
     
     # Redis
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")

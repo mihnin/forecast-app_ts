@@ -4,6 +4,7 @@ import logging
 from app.models.prediction import PredictionRequest, PredictionResponse, PredictionResult
 from app.core.queue import JobQueue
 from app.services.forecasting.prediction import prepare_prediction_task
+from app.utils.task_utils import get_task_by_id, validate_completed_task, export_to_format
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -54,22 +55,9 @@ async def get_prediction_result(
     Получение результатов прогнозирования
     """
     try:
-        # Получаем информацию о задаче
-        tasks = queue.get_all_tasks()
-        task = next((t for t in tasks if t.get("task_id") == task_id), None)
-        
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Задача с ID {task_id} не найдена")
-        
-        if task["status"] != "completed":
-            raise HTTPException(status_code=400, detail=f"Задача с ID {task_id} еще не завершена (статус: {task['status']})")
-        
-        # Получаем результаты прогнозирования
-        if "result" not in task or not task["result"]:
-            raise HTTPException(status_code=500, detail=f"Результаты для задачи с ID {task_id} отсутствуют")
-        
-        # Преобразуем результаты для возврата
-        result = task["result"]
+        # Используем вспомогательную функцию для получения и проверки задачи
+        task = get_task_by_id(queue, task_id)
+        result = validate_completed_task(task, task_id)
         
         return PredictionResult(
             prediction_id=task_id,
@@ -94,70 +82,15 @@ async def export_prediction(
     Экспорт результатов прогнозирования в различных форматах
     """
     try:
-        # Получаем информацию о задаче
-        tasks = queue.get_all_tasks()
-        task = next((t for t in tasks if t.get("task_id") == task_id), None)
+        # Используем вспомогательные функции для получения и проверки задачи
+        task = get_task_by_id(queue, task_id)
+        result = validate_completed_task(task, task_id)
         
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Задача с ID {task_id} не найдена")
+        # Получаем данные для экспорта
+        predictions = result.get("predictions")
         
-        if task["status"] != "completed":
-            raise HTTPException(status_code=400, detail=f"Задача с ID {task_id} еще не завершена (статус: {task['status']})")
-        
-        # Получаем результаты прогнозирования
-        if "result" not in task or not task["result"]:
-            raise HTTPException(status_code=500, detail=f"Результаты для задачи с ID {task_id} отсутствуют")
-        
-        # Экспорт в зависимости от запрошенного формата
-        result = task["result"]
-        
-        if format == "json":
-            # Возвращаем JSON
-            return result.get("predictions")
-        elif format == "csv":
-            # Преобразуем в CSV
-            import pandas as pd
-            from fastapi.responses import StreamingResponse
-            import io
-            
-            # Преобразуем в DataFrame
-            predictions = result.get("predictions")
-            df = pd.DataFrame(predictions)
-            
-            # Сохраняем в буфер
-            buffer = io.StringIO()
-            df.to_csv(buffer, index=False)
-            buffer.seek(0)
-            
-            # Возвращаем CSV
-            return StreamingResponse(
-                buffer,
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename=prediction_{task_id}.csv"}
-            )
-        elif format == "excel":
-            # Преобразуем в Excel
-            import pandas as pd
-            from fastapi.responses import StreamingResponse
-            import io
-            
-            # Преобразуем в DataFrame
-            predictions = result.get("predictions")
-            df = pd.DataFrame(predictions)
-            
-            # Сохраняем в буфер
-            buffer = io.BytesIO()
-            df.to_excel(buffer, index=False)
-            buffer.seek(0)
-            
-            # Возвращаем Excel
-            return StreamingResponse(
-                buffer,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename=prediction_{task_id}.xlsx"}
-            )
-        else:
-            raise HTTPException(status_code=400, detail=f"Неподдерживаемый формат: {format}")
+        # Используем общую функцию для экспорта в различные форматы
+        return export_to_format(predictions, format, "prediction", task_id)
     
     except HTTPException:
         raise

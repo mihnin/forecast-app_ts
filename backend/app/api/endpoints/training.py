@@ -6,6 +6,7 @@ import json
 from app.models.training import TrainingRequest, TrainingResponse, TrainingResult
 from app.core.queue import JobQueue
 from app.services.forecasting.training import prepare_training_task
+from app.utils.task_utils import get_task_by_id, validate_completed_task
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -56,22 +57,9 @@ async def get_training_result(
     Получение результатов обучения модели
     """
     try:
-        # Получаем информацию о задаче
-        tasks = queue.get_all_tasks()
-        task = next((t for t in tasks if t.get("task_id") == task_id), None)
-        
-        if not task:
-            raise HTTPException(status_code=404, detail=f"Задача с ID {task_id} не найдена")
-        
-        if task["status"] != "completed":
-            raise HTTPException(status_code=400, detail=f"Задача с ID {task_id} еще не завершена (статус: {task['status']})")
-        
-        # Получаем результаты обучения
-        if "result" not in task or not task["result"]:
-            raise HTTPException(status_code=500, detail=f"Результаты для задачи с ID {task_id} отсутствуют")
-        
-        # Преобразуем результаты для возврата
-        result = task["result"]
+        # Используем вспомогательную функцию для получения и проверки задачи
+        task = get_task_by_id(queue, task_id)
+        result = validate_completed_task(task, task_id)
         
         return TrainingResult(
             model_id=result.get("model_id"),

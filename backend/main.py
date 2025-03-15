@@ -12,10 +12,10 @@ app = FastAPI(title="Time Series Forecast API")
 # CORS middleware setup to allow React frontend to communicate with API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific domains
+    allow_origins=settings.BACKEND_CORS_ORIGINS,  # Используем настройки из конфигурационного файла
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],  # Ограничиваем методы только необходимыми
+    allow_headers=["Content-Type", "Authorization"],  # Ограничиваем заголовки только необходимыми
 )
 
 # Include API routes
