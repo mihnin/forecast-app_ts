@@ -1,19 +1,21 @@
 # Базовый образ
-FROM node:16-alpine AS builder
+FROM node:20-alpine as builder
 
 WORKDIR /app
 
-# Копируем файлы зависимостей фронтенда
-COPY frontend/package*.json ./
+# Копируем файлы зависимостей
+COPY package.json ./
+COPY scripts/update-deps.sh ./scripts/
 
-# Устанавливаем зависимости
-RUN npm ci
+# Делаем скрипт исполняемым
+RUN chmod +x ./scripts/update-deps.sh
 
-# Копируем остальные файлы фронтенда
-COPY frontend/ ./
+# Обновляем lock-файл и устанавливаем зависимости
+RUN ./scripts/update-deps.sh
+RUN npm install
 
-# Проверяем наличие важных файлов перед сборкой
-RUN test -f public/index.html || (echo "Error: public/index.html missing!" && exit 1)
+# Копируем остальные файлы проекта
+COPY . .
 
 # Сборка проекта
 RUN npm run build
