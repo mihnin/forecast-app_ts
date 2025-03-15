@@ -142,18 +142,21 @@ def load_csv_in_chunks(file_path: str, chunk_size: int) -> pd.DataFrame:
         raise
 
 
-def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, target_col: str) -> pd.DataFrame:
+def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, target_col: str, 
+                         freq: Optional[str] = None, fill_method: str = "ffill") -> pd.DataFrame:
     """
-    Преобразует DataFrame в формат с колонками (item_id, timestamp, target)
+    Преобразует DataFrame в формат с колонками (item_id, timestamp, target) и переводит в указанную частоту
     
     Args:
         df: Исходный датафрейм
         id_col: Название колонки с идентификаторами
         timestamp_col: Название колонки с датами
         target_col: Название целевой колонки
+        freq: Частота данных (D-день, M-месяц, Q-квартал, Y-год, H-час, T-минута, None-автоопределение)
+        fill_method: Метод заполнения пропусков после преобразования частоты
         
     Returns:
-        Датафрейм с переименованными колонками для AutoGluon
+        Датафрейм с переименованными колонками для AutoGluon и правильной частотой
     """
     # Проверяем наличие необходимых колонок
     required_cols = [id_col, timestamp_col, target_col]
@@ -164,6 +167,13 @@ def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, tar
     # Создаем копию датафрейма
     df_local = df.copy()
     
+    # Убедимся, что колонка с датами имеет правильный тип
+    if not pd.api.types.is_datetime64_any_dtype(df_local[timestamp_col]):
+        df_local[timestamp_col] = pd.to_datetime(df_local[timestamp_col], errors="coerce")
+    
+    # Преобразуем item_id в строку
+    df_local[id_col] = df_local[id_col].astype(str)
+    
     # Переименовываем колонки
     column_mapping = {
         id_col: "item_id",
@@ -171,22 +181,183 @@ def convert_to_timeseries(df: pd.DataFrame, id_col: str, timestamp_col: str, tar
         target_col: "target"
     }
     
-    # Выполняем переименование
+    # Список колонок, которые нужно сохранить
+    all_cols = list(df_local.columns)
+    mapped_cols = list(column_mapping.keys())
+    unchanged_cols = [col for col in all_cols if col not in mapped_cols]
+    
+    # Применяем переименование
     df_local = df_local.rename(columns=column_mapping)
     
-    # Проверяем, что колонки были успешно переименованы
+    # Определяем начальные и конечные даты для каждого временного ряда
+    if freq:
+        # Преобразуем в мультииндекс для упрощения работы с временными рядами
+        df_local = df_local.set_index(["item_id", "timestamp"])
+    
+        # Для каждого ID выполняем преобразование частоты
+        result_pieces = []
+        for item_id, group in df_local.groupby("item_id", as_index=False):
+            # Определяем дату начала и конца для конкретного ряда
+            start_date = group.index.get_level_values("timestamp").min()
+            end_date = group.index.get_level_values("timestamp").max()
+            
+            # Создаем регулярный временной индекс
+            if freq in ["D", "B", "H", "min", "T", "S"]:
+                # Для дней, рабочих дней, часов, минут, секунд
+                idx = pd.date_range(start=start_date, end=end_date, freq=freq)
+            elif freq in ["M", "MS"]:
+                # Для месяцев
+                idx = pd.date_range(start=start_date.replace(day=1), 
+                                    end=end_date + pd.offsets.MonthEnd(0), 
+                                    freq=freq)
+            elif freq in ["Q", "QS"]:
+                # Для кварталов
+                idx = pd.date_range(start=start_date.replace(day=1), 
+                                    end=end_date + pd.offsets.QuarterEnd(0), 
+                                    freq=freq)
+            elif freq in ["Y", "YS"]:
+                # Для годов
+                idx = pd.date_range(start=start_date.replace(month=1, day=1), 
+                                    end=end_date + pd.offsets.YearEnd(0), 
+                                    freq=freq)
+            else:
+                # Для других частот используем стандартный date_range
+                idx = pd.date_range(start=start_date, end=end_date, freq=freq)
+            
+            # Создаем полный мультииндекс для данного ID
+            multi_idx = pd.MultiIndex.from_product([[item_id], idx], names=["item_id", "timestamp"])
+            
+            # Переиндексируем данные группы
+            piece = group.reindex(multi_idx)
+            
+            # Заполняем пропуски
+            if fill_method == "ffill":
+                piece = piece.fillna(method="ffill").fillna(method="bfill")
+            elif fill_method == "linear":
+                piece = piece.interpolate(method="linear")
+            elif fill_method == "zero":
+                piece = piece.fillna(0)
+            
+            result_pieces.append(piece)
+        
+        # Собираем все кусочки вместе
+        if result_pieces:
+            df_local = pd.concat(result_pieces)
+            # Сбрасываем индекс
+            df_local = df_local.reset_index()
+        else:
+            df_local = pd.DataFrame(columns=["item_id", "timestamp", "target"] + unchanged_cols)
+    
+    # Сортируем по ID и дате
+    df_local = df_local.sort_values(["item_id", "timestamp"]).reset_index(drop=True)
+    
+    # Проверяем, что необходимые колонки созданы
     for new_col in ["item_id", "timestamp", "target"]:
         if new_col not in df_local.columns:
             raise ValueError(f"Не удалось создать колонку '{new_col}'")
     
-    # Преобразуем item_id в строку и сортируем
-    df_local["item_id"] = df_local["item_id"].astype(str)
-    df_local = df_local.sort_values(["item_id", "timestamp"])
-    df_local = df_local.reset_index(drop=True)
-    
-    logger.info(f"Преобразовано в TimeSeriesDataFrame формат. Колонки: {list(df_local.columns)}")
+    # Логируем информацию
+    freq_str = freq if freq else "определена автоматически"
+    logger.info(f"Преобразовано в TimeSeriesDataFrame формат с частотой {freq_str}. Колонки: {list(df_local.columns)}")
     
     return df_local
+
+
+def detect_frequency(df: pd.DataFrame, timestamp_col: str, id_col: Optional[str] = None) -> str:
+    """
+    Определяет частоту временного ряда на основе данных
+    
+    Args:
+        df: Датафрейм с данными
+        timestamp_col: Название колонки с датами
+        id_col: Название колонки с идентификаторами (опционально)
+        
+    Returns:
+        Строка с частотой в формате pandas (D, M, Q, Y, H, T, ...)
+    """
+    # Проверяем наличие колонки с датами
+    if timestamp_col not in df.columns:
+        raise ValueError(f"Колонка {timestamp_col} не найдена в датафрейме")
+    
+    # Убедимся, что колонка с датами имеет правильный тип
+    timestamps = df[timestamp_col]
+    if not pd.api.types.is_datetime64_any_dtype(timestamps):
+        timestamps = pd.to_datetime(timestamps, errors="coerce")
+    
+    # Определяем частоту для каждого ID отдельно, если указан id_col
+    if id_col and id_col in df.columns:
+        freq_counts = {}
+        for name, group in df.groupby(id_col):
+            group_timestamps = group[timestamp_col]
+            if not pd.api.types.is_datetime64_any_dtype(group_timestamps):
+                group_timestamps = pd.to_datetime(group_timestamps, errors="coerce")
+            
+            if len(group_timestamps) > 1:
+                # Сортируем и находим разницы между последовательными метками времени
+                sorted_ts = group_timestamps.sort_values()
+                diffs = sorted_ts.diff().dropna()
+                
+                if len(diffs) > 0:
+                    # Находим наиболее частый интервал
+                    most_common_diff = diffs.value_counts().index[0]
+                    freq = pd.infer_freq(sorted_ts)
+                    if freq:
+                        freq_counts[freq] = freq_counts.get(freq, 0) + 1
+                    else:
+                        # Если автоматическое определение не сработало, пробуем определить вручную
+                        seconds = most_common_diff.total_seconds()
+                        
+                        if seconds == 60:  # 1 минута
+                            inferred_freq = "T"
+                        elif seconds == 3600:  # 1 час
+                            inferred_freq = "H"
+                        elif seconds == 86400:  # 1 день
+                            inferred_freq = "D"
+                        elif 25 <= seconds / 86400 <= 35:  # ~1 месяц (в днях)
+                            inferred_freq = "M"
+                        elif 85 <= seconds / 86400 <= 95:  # ~3 месяца (в днях)
+                            inferred_freq = "Q"
+                        elif 350 <= seconds / 86400 <= 380:  # ~1 год (в днях)
+                            inferred_freq = "Y"
+                        else:
+                            inferred_freq = "D"  # По умолчанию - день
+                        
+                        freq_counts[inferred_freq] = freq_counts.get(inferred_freq, 0) + 1
+        
+        # Возвращаем наиболее часто встречающуюся частоту
+        if freq_counts:
+            return max(freq_counts.items(), key=lambda x: x[1])[0]
+    
+    # Если id_col не указан или не удалось определить частоту по группам
+    # Пробуем определить общую частоту для всего набора данных
+    if len(timestamps) > 1:
+        sorted_ts = timestamps.sort_values()
+        freq = pd.infer_freq(sorted_ts)
+        
+        if freq:
+            return freq
+        
+        # Если автоматическое определение не сработало
+        diffs = sorted_ts.diff().dropna()
+        if len(diffs) > 0:
+            most_common_diff = diffs.value_counts().index[0]
+            seconds = most_common_diff.total_seconds()
+            
+            if seconds == 60:  # 1 минута
+                return "T"
+            elif seconds == 3600:  # 1 час
+                return "H"
+            elif seconds == 86400:  # 1 день
+                return "D"
+            elif 25 <= seconds / 86400 <= 35:  # ~1 месяц (в днях)
+                return "M"
+            elif 85 <= seconds / 86400 <= 95:  # ~3 месяца (в днях)
+                return "Q"
+            elif 350 <= seconds / 86400 <= 380:  # ~1 год (в днях)
+                return "Y"
+    
+    # Если не удалось определить частоту, возвращаем "D" (день) по умолчанию
+    return "D"
 
 
 def split_train_test(df: pd.DataFrame, date_col: str, test_size: float = 0.2, validation_size: float = 0.0):

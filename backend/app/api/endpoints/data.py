@@ -7,7 +7,7 @@ import uuid
 import json
 import logging
 from app.models.data import DataResponse, DataAnalysisRequest, DataAnalysisResponse, ColumnSelection
-from app.services.data.data_processing import process_uploaded_file
+from app.services.data.data_processing import process_uploaded_file, detect_frequency
 from app.services.data.data_validation import validate_dataset
 from app.core.config import settings
 from app.core.queue import JobQueue
@@ -39,13 +39,50 @@ async def upload_data(
         # Обрабатываем файл
         df, info = process_uploaded_file(file_path, chunk_size)
         
+        # Определяем частоту временного ряда
+        try:
+            # Ищем подходящие имена для колонок даты/времени
+            date_cols = [col for col in df.columns if any(keyword in col.lower() 
+                                                         for keyword in ["date", "time", "дата", "время"])]
+            
+            # Если подходящие колонки не найдены, ищем колонки с datetime типом
+            if not date_cols:
+                date_cols = [col for col in df.columns 
+                            if pd.api.types.is_datetime64_any_dtype(df[col]) 
+                            or (pd.to_datetime(df[col], errors='coerce').notna().sum() > 0.8 * len(df))]
+            
+            # Если колонка найдена, определяем частоту
+            freq = None
+            if date_cols:
+                freq = detect_frequency(df, date_cols[0])
+                logger.info(f"Определена частота временного ряда: {freq}")
+        except Exception as e:
+            logger.warning(f"Не удалось определить частоту: {str(e)}")
+            freq = None
+        
         # Сохраняем информацию о датасете
         DATASETS[dataset_id] = {
             "file_path": file_path,
             "filename": file.filename,
             "info": info,
-            "df": df  # В реальном приложении мы бы не хранили DataFrame в памяти
+            "df": df,  # В реальном приложении мы бы не хранили DataFrame в памяти
+            "detected_frequency": freq
         }
+        
+        # Дополняем информацию о датасете
+        additional_info = {
+            "detected_frequency": freq,
+            "has_missing_values": any(df[col].isna().any() for col in df.columns),
+            "categorical_columns": [col for col in df.columns if pd.api.types.is_categorical_dtype(df[col]) 
+                                  or pd.api.types.is_object_dtype(df[col])],
+            "numeric_columns": [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+        }
+        
+        # Добавляем дополнительную информацию к основной
+        if hasattr(info, "additional"):
+            info.additional.update(additional_info)
+        else:
+            info.additional = additional_info
         
         # Формируем ответ
         response = DataResponse(

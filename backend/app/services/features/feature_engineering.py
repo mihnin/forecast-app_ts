@@ -6,17 +6,18 @@ from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-def add_russian_holiday_feature(df: pd.DataFrame, date_col="timestamp", holiday_col="russian_holiday") -> pd.DataFrame:
+def add_russian_holiday_feature(df: pd.DataFrame, date_col="timestamp", holiday_col_prefix="holiday", include_flag=True) -> pd.DataFrame:
     """
-    Добавляет колонку с индикатором праздников РФ
+    Добавляет расширенные признаки российских праздников
     
     Args:
         df: Исходный датафрейм
         date_col: Название столбца с датами
-        holiday_col: Название столбца для индикатора праздников
+        holiday_col_prefix: Префикс для названий создаваемых столбцов с праздниками
+        include_flag: Добавить общий флаг праздника (True) или только отдельные праздники (False)
         
     Returns:
-        Датафрейм с добавленным признаком праздников
+        Датафрейм с добавленными признаками праздников
     """
     if date_col not in df.columns:
         logger.warning("Колонка даты не найдена, не можем добавить признак праздника")
@@ -25,20 +26,79 @@ def add_russian_holiday_feature(df: pd.DataFrame, date_col="timestamp", holiday_
     # Создаем копию датафрейма
     result_df = df.copy()
     
+    # Убедимся, что колонка с датами имеет правильный тип
     if not pd.api.types.is_datetime64_any_dtype(result_df[date_col]):
         result_df[date_col] = pd.to_datetime(result_df[date_col], errors="coerce")
     
+    # Определяем диапазон лет в данных (с запасом в один год для прогноза)
     min_year = result_df[date_col].dt.year.min()
-    max_year = result_df[date_col].dt.year.max()
-    ru_holidays = holidays.country_holidays(country="RU", years=range(min_year, max_year + 1))
+    max_year = result_df[date_col].dt.year.max() + 1
     
-    def is_holiday(dt):
-        return 1.0 if dt.date() in ru_holidays else 0.0
+    try:
+        import holidays
+        ru_holidays = holidays.country_holidays(country="RU", years=range(min_year, max_year + 1))
+    except ImportError:
+        logger.error("Библиотека holidays не установлена. Установите с помощью pip install holidays")
+        return df
+    except Exception as e:
+        logger.error(f"Не удалось получить данные о праздниках: {str(e)}")
+        return df
     
-    result_df[holiday_col] = result_df[date_col].apply(is_holiday).astype(float)
+    # Добавляем общий индикатор праздника
+    if include_flag:
+        result_df[f"{holiday_col_prefix}_flag"] = result_df[date_col].apply(
+            lambda dt: 1.0 if dt.date() in ru_holidays else 0.0
+        ).astype(float)
+    
+    # Добавляем признаки для важных праздников
+    important_holidays = {
+        "new_year": ["Новый год", "New Year's Day"],
+        "christmas": ["Рождество Христово", "Christmas Day"],
+        "defender": ["День защитника Отечества", "Defender of the Fatherland Day"],
+        "womens_day": ["Международный женский день", "International Women's Day"],
+        "labor_day": ["Праздник Весны и Труда", "Labour Day"],
+        "victory_day": ["День Победы", "Victory Day"],
+        "russia_day": ["День России", "Russia Day"],
+        "unity_day": ["День народного единства", "Unity Day"]
+    }
+    
+    # Создаем признаки для каждого важного праздника
+    for holiday_key, holiday_names in important_holidays.items():
+        result_df[f"{holiday_col_prefix}_{holiday_key}"] = result_df[date_col].apply(
+            lambda dt: 1.0 if dt.date() in ru_holidays and any(name in ru_holidays.get(dt.date(), "") for name in holiday_names) else 0.0
+        ).astype(float)
+    
+    # Добавляем индикаторы выходных
+    result_df["is_weekend"] = result_df[date_col].dt.dayofweek.isin([5, 6]).astype(float)
+    
+    # Добавляем рабочие и длинные выходные 
+    # (если праздник выпадает на рабочий день или соединяется с выходными)
+    result_df["is_long_weekend"] = 0.0
+    
+    # Сортируем датафрейм по дате для правильного определения длинных выходных
+    if id_col := next((col for col in df.columns if "id" in col.lower()), None):
+        temp_df = result_df.sort_values([id_col, date_col])
+    else:
+        temp_df = result_df.sort_values(date_col)
+    
+    # Находим длинные выходные (3+ дня подряд)
+    for _, group in temp_df.groupby(id_col) if id_col else [(None, temp_df)]:
+        dates = group[date_col].dt.date.tolist()
+        is_off_day = [(d in ru_holidays or d.weekday() >= 5) for d in dates]
+        
+        # Находим длинные выходные (3+ дня подряд)
+        consecutive_days = 0
+        for i, is_off in enumerate(is_off_day):
+            if is_off:
+                consecutive_days += 1
+            else:
+                consecutive_days = 0
+                
+            if consecutive_days >= 3:
+                idx = group.iloc[max(0, i-2):i+1].index
+                result_df.loc[idx, "is_long_weekend"] = 1.0
     
     return result_df
-
 
 def fill_missing_values(df: pd.DataFrame, method: str = "None", group_cols=None) -> pd.DataFrame:
     """

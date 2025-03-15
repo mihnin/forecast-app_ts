@@ -13,3 +13,4 @@ plotly
 statsmodels
 autogluon.timeseries
 openpyxl
+holidays
