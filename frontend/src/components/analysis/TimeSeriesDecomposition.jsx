@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Line } from 'react-plotly.js';
+import Plot from 'react-plotly.js';
 import { Card, Row, Col, Spin, Alert } from 'antd';
 
 const TimeSeriesDecomposition = ({ datasetId, dateColumn, valueColumn }) => {
@@ -69,7 +69,7 @@ const TimeSeriesDecomposition = ({ datasetId, dateColumn, valueColumn }) => {
         <Card title="Декомпозиция временного ряда" className="decomposition-card">
             <Row gutter={[0, 16]}>
                 <Col span={24}>
-                    <Line
+                    <Plot
                         data={[{
                             x: decompositionData.dates,
                             y: decompositionData.observed,
@@ -84,7 +84,7 @@ const TimeSeriesDecomposition = ({ datasetId, dateColumn, valueColumn }) => {
                     />
                 </Col>
                 <Col span={24}>
-                    <Line
+                    <Plot
                         data={[{
                             x: decompositionData.dates,
                             y: decompositionData.trend,
@@ -100,7 +100,7 @@ const TimeSeriesDecomposition = ({ datasetId, dateColumn, valueColumn }) => {
                     />
                 </Col>
                 <Col span={24}>
-                    <Line
+                    <Plot
                         data={[{
                             x: decompositionData.dates,
                             y: decompositionData.seasonal,
@@ -116,7 +116,7 @@ const TimeSeriesDecomposition = ({ datasetId, dateColumn, valueColumn }) => {
                     />
                 </Col>
                 <Col span={24}>
-                    <Line
+                    <Plot
                         data={[{
                             x: decompositionData.dates,
                             y: decompositionData.residual,
