@@ -9,6 +9,7 @@ redis
 aioredis
 holidays
 pydantic-settings
+
 # Data processing and analysis
 # Понижаем версию numpy для совместимости с tensorflow
 numpy
@@ -21,7 +22,6 @@ scikit-learn
 prophet
 # Обновляем версии tensorflow и keras до совместимых с выбранным numpy
 autogluon.timeseries
-
 
 # Utilities
 python-jose[cryptography]

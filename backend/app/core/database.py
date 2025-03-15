@@ -7,22 +7,14 @@ from sqlalchemy.orm import sessionmaker
 import os
 from app.core.config import settings
 
-# Create database directory if not exists
-os.makedirs("db", exist_ok=True)
-
-# Database URL based on environment
+# Database URL construction
 if settings.ENVIRONMENT == "test":
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./db/test.db"
-elif settings.ENVIRONMENT == "production":
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./db/prod.db"
-else:  # development
-    SQLALCHEMY_DATABASE_URL = "sqlite:///./db/dev.db"
+    SQLALCHEMY_DATABASE_URL = "postgresql://postgres_admin:postgres_admin@172.27.57.214:5433/test_app"
+else:  # development and production
+    SQLALCHEMY_DATABASE_URL = "postgresql://postgres_admin:postgres_admin@172.27.57.214:5433/test_app"
 
-# Create engine with appropriate settings for SQLite
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False}  # Needed for SQLite
-)
+# Create engine without SQLite-specific arguments
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

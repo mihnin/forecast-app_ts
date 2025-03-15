@@ -1,7 +1,7 @@
 import json
 import time
 from typing import Dict, List, Any, Optional, Union
-import redis
+import aioredis
 from celery import Celery
 import uuid
 import logging
@@ -16,23 +16,16 @@ class JobQueue:
         """
         Initialize the job queue with Redis connection
         """
-        self.redis = redis.Redis(host="redis", port=6379, db=0)
+        self.redis = None
         self.celery = Celery('tasks', broker='redis://redis:6379/0')
-        
-        # Make sure Redis is accessible
-        try:
-            self.redis.ping()
-            logger.info("Successfully connected to Redis")
-        except redis.ConnectionError as e:
-            logger.error(f"Failed to connect to Redis: {e}")
-            # Could use a fallback in-memory queue for development
 
     async def initialize(self):
         """
         Асинхронная инициализация очереди при запуске приложения
         """
         try:
-            # Проверяем доступность Redis
+            # Initialize Redis connection
+            self.redis = await aioredis.create_redis_pool('redis://redis:6379/0')
             await self.redis.ping()
             logger.info("Successfully initialized connection to Redis")
             
@@ -429,10 +422,7 @@ class JobQueue:
         """
         Асинхронное освобождение ресурсов Redis при завершении работы
         """
-        try:
-            # Закрытие соединения с Redis
-            await self.redis.close()
+        if self.redis is not None:
+            self.redis.close()
+            await self.redis.wait_closed()
             logger.info("Redis connection closed")
-        except Exception as e:
-            logger.error(f"Error closing Redis connection: {str(e)}")
-            raise
