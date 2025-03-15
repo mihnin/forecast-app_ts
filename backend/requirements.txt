@@ -6,6 +6,7 @@ SQLAlchemy
 alembic
 psycopg2-binary
 redis
+aioredis
 holidays
 pydantic-settings
 # Data processing and analysis

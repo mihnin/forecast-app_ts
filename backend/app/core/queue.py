@@ -26,7 +26,26 @@ class JobQueue:
         except redis.ConnectionError as e:
             logger.error(f"Failed to connect to Redis: {e}")
             # Could use a fallback in-memory queue for development
-        
+
+    async def initialize(self):
+        """
+        Асинхронная инициализация очереди при запуске приложения
+        """
+        try:
+            # Проверяем доступность Redis
+            await self.redis.ping()
+            logger.info("Successfully initialized connection to Redis")
+            
+            # Очищаем устаревшие флаги выполнения
+            executing_keys = await self.redis.keys("executing:*")
+            if executing_keys:
+                await self.redis.delete(*executing_keys)
+                logger.info(f"Cleared {len(executing_keys)} stale execution flags")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize queue: {str(e)}")
+            raise
+    
     def add_task(self, user_id: str, task_type: str, params: Dict[str, Any]) -> str:
         """
         Add a new task to the queue and return its ID
@@ -406,13 +425,14 @@ class JobQueue:
             "average_execution_time": average_execution_time
         }
     
-    def cleanup(self):
+    async def cleanup(self):
         """
-        Освобождение ресурсов Redis при завершении работы
+        Асинхронное освобождение ресурсов Redis при завершении работы
         """
         try:
             # Закрытие соединения с Redis
-            self.redis.close()
-            logger.info("Соединение с Redis закрыто")
+            await self.redis.close()
+            logger.info("Redis connection closed")
         except Exception as e:
-            logger.error(f"Ошибка при закрытии соединения с Redis: {str(e)}")
+            logger.error(f"Error closing Redis connection: {str(e)}")
+            raise
