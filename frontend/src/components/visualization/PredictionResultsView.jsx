@@ -1,429 +1,132 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Card, 
-  Tabs, 
-  Table, 
-  Space, 
-  Button, 
-  Select, 
-  Typography, 
-  Row, 
-  Col, 
-  Statistic,
-  Empty,
-  Tooltip,
-  Tag,
-  Radio,
-  Divider
-} from 'antd';
-import { 
-  LineChartOutlined, 
-  TableOutlined, 
-  DownloadOutlined, 
-  InfoCircleOutlined,
-  DashboardOutlined,
-  CloudDownloadOutlined
-} from '@ant-design/icons';
+import React, { useState } from 'react';
+import { Card, Space, Typography, Button, Spin, Descriptions, Table, Select } from 'antd';
+import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import TimeSeriesChart from '../charts/TimeSeriesChart';
 
-const { Title: TitleTypography, Text, Paragraph } = Typography;
-const { TabPane } = Tabs;
+const { Title, Text } = Typography;
 const { Option } = Select;
 
-/**
- * Компонент для отображения результатов прогнозирования
- * @param {Object} predictionResult - Результаты прогнозирования
- * @param {function} onDownload - Функция для скачивания результатов
- */
-const PredictionResultsView = ({ predictionResult, onDownload }) => {
-  const [activeTab, setActiveTab] = useState('1');
-  const [selectedSeries, setSelectedSeries] = useState(null);
-  const [dateFormat, setDateFormat] = useState('day');
-  const [showConfidenceInterval, setShowConfidenceInterval] = useState(true);
-  const [selectedQuantiles, setSelectedQuantiles] = useState(['0.5']);
+const PredictionResultsView = ({
+    data,
+    predictions,
+    modelInfo,
+    metrics,
+    loading,
+    onExport,
+    onRefresh
+}) => {
+    const [exportFormat, setExportFormat] = useState('csv');
 
-  // Установка первой серии как выбранной, если еще не выбрана
-  useEffect(() => {
-    if (!selectedSeries && predictionResult?.plots) {
-      const firstSeriesKey = Object.keys(predictionResult.plots).find(k => k !== 'metadata');
-      if (firstSeriesKey) {
-        setSelectedSeries(firstSeriesKey);
-      }
-    }
-  }, [predictionResult, selectedSeries]);
-
-  // Проверка наличия данных
-  if (!predictionResult || !predictionResult.predictions || !predictionResult.plots) {
-    return (
-      <Card title="Результаты прогнозирования">
-        <Empty 
-          description="Нет данных о результатах прогнозирования" 
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
-      </Card>
-    );
-  }
-
-  // Список серий временных рядов для выбора
-  const seriesList = predictionResult.plots ? 
-    Object.keys(predictionResult.plots)
-      .filter(key => key !== 'metadata')
-      .map(id => ({
-        id,
-        label: `Серия ${id}`
-      })) : [];
-
-  // Форматирование меток времени
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    switch (dateFormat) {
-      case 'time':
-        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-      case 'month':
-        return date.toLocaleDateString('ru-RU', { month: 'short', year: 'numeric' });
-      case 'year':
-        return date.getFullYear().toString();
-      case 'datetime':
-        return date.toLocaleString('ru-RU', { 
-          day: 'numeric', 
-          month: 'short', 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        });
-      default: // день
-        return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-    }
-  };
-
-  // Подготовка данных для графика
-  const getChartData = () => {
-    if (!selectedSeries || !predictionResult.plots || !predictionResult.plots[selectedSeries]) {
-      return null;
-    }
-
-    const seriesData = predictionResult.plots[selectedSeries];
-    const { timestamps } = seriesData;
-    
-    // Создаем массив отформатированных меток времени
-    const labels = timestamps.map(formatTimestamp);
-    
-    // Данные для графика
-    const chartData = {
-      labels,
-      datasets: []
-    };
-
-    // Добавляем основной прогноз (медиана - 0.5 квантиль)
-    if (selectedQuantiles.includes('0.5')) {
-      chartData.datasets.push({
-        label: 'Прогноз (медиана)',
-        data: seriesData['0.5'],
-        borderColor: 'rgba(53, 162, 235, 1)',
-        backgroundColor: 'rgba(53, 162, 235, 0.5)',
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        borderWidth: 2,
-      });
-    }
-
-    // Добавляем выбранные квантили (кроме 0.5, она уже добавлена)
-    selectedQuantiles.forEach(quantile => {
-      if (quantile !== '0.5' && seriesData[quantile]) {
-        chartData.datasets.push({
-          label: `Квантиль ${quantile}`,
-          data: seriesData[quantile],
-          borderColor: quantile < '0.5' ? 'rgba(255, 99, 132, 0.8)' : 'rgba(75, 192, 192, 0.8)',
-          backgroundColor: 'transparent',
-          pointRadius: 1,
-          pointHoverRadius: 4,
-          borderWidth: 1,
-          borderDash: [5, 5],
-        });
-      }
-    });
-
-    // Добавляем доверительный интервал (если включен)
-    if (showConfidenceInterval && seriesData['0.1'] && seriesData['0.9']) {
-      // Верхний интервал
-      chartData.datasets.push({
-        label: 'Верхняя граница (90%)',
-        data: seriesData['0.9'],
-        borderColor: 'transparent',
-        pointRadius: 0,
-        fill: '+1', // Заполнять до следующего датасета
-      });
-
-      // Нижний интервал
-      chartData.datasets.push({
-        label: 'Нижняя граница (10%)',
-        data: seriesData['0.1'],
-        borderColor: 'transparent',
-        backgroundColor: 'rgba(53, 162, 235, 0.2)',
-        pointRadius: 0,
-        fill: '-1', // Заполнять до предыдущего датасета
-      });
-    }
-
-    return chartData;
-  };
-
-  // Подготовка данных для таблицы
-  const getTableData = () => {
-    const { predictions } = predictionResult;
-    
-    // Преобразование данных для таблицы
-    const tableData = predictions.map((item, index) => ({
-      key: index,
-      ...item,
-      timestamp_formatted: formatTimestamp(item.timestamp)
-    }));
-
-    return tableData;
-  };
-
-  // Подготовка колонок для таблицы
-  const getTableColumns = () => {
-    if (!predictionResult.predictions[0]) {
-      return [];
-    }
-
-    const prediction = predictionResult.predictions[0];
-    const columns = [
-      {
-        title: 'ID',
-        dataIndex: 'item_id',
-        key: 'item_id',
-        width: 150,
-      },
-      {
-        title: 'Дата/время',
-        dataIndex: 'timestamp_formatted',
-        key: 'timestamp',
-        width: 180,
-        sorter: (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
-      }
+    // Определяем колонки для таблицы с метриками
+    const metricsColumns = [
+        {
+            title: 'Метрика',
+            dataIndex: 'name',
+            key: 'name',
+        },
+        {
+            title: 'Значение',
+            dataIndex: 'value',
+            key: 'value',
+            render: (value) => typeof value === 'number' ? value.toFixed(4) : value
+        }
     ];
 
-    // Добавляем колонки для квантилей
-    const quantileKeys = Object.keys(prediction)
-      .filter(key => key !== 'item_id' && key !== 'timestamp' && key !== 'timestamp_formatted');
-    
-    quantileKeys.forEach(key => {
-      columns.push({
-        title: `Квантиль ${key}`,
-        dataIndex: key,
-        key,
-        render: (value) => value !== null ? value.toFixed(2) : '-',
-        sorter: (a, b) => a[key] - b[key],
-      });
-    });
+    // Форматируем метрики для таблицы
+    const metricsData = Object.entries(metrics || {}).map(([key, value], index) => ({
+        key: index,
+        name: key,
+        value: value
+    }));
 
-    return columns;
-  };
+    return (
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+            {/* График прогноза */}
+            <Card>
+                <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                        <Title level={4}>Результаты прогнозирования</Title>
+                        <Space>
+                            <Select 
+                                value={exportFormat}
+                                onChange={setExportFormat}
+                                style={{ width: 120 }}
+                            >
+                                <Option value="csv">CSV</Option>
+                                <Option value="excel">Excel</Option>
+                                <Option value="json">JSON</Option>
+                            </Select>
+                            <Button 
+                                icon={<DownloadOutlined />}
+                                onClick={() => onExport(exportFormat)}
+                            >
+                                Экспорт
+                            </Button>
+                            <Button 
+                                icon={<ReloadOutlined />}
+                                onClick={onRefresh}
+                                loading={loading}
+                            >
+                                Обновить
+                            </Button>
+                        </Space>
+                    </Space>
 
-  // Обработчик изменения выбранной серии
-  const handleSeriesChange = (value) => {
-    setSelectedSeries(value);
-  };
+                    {loading ? (
+                        <div style={{ textAlign: 'center', padding: '40px' }}>
+                            <Spin size="large" />
+                        </div>
+                    ) : (
+                        <TimeSeriesChart
+                            data={data}
+                            predictions={predictions}
+                            dateColumn="date"
+                            valueColumn="value"
+                            height={500}
+                        />
+                    )}
+                </Space>
+            </Card>
 
-  // Обработчик изменения квантилей
-  const handleQuantilesChange = (values) => {
-    // Всегда включаем 0.5 (медиана)
-    if (!values.includes('0.5')) {
-      values.push('0.5');
-    }
-    setSelectedQuantiles(values);
-  };
+            {/* Информация о модели */}
+            {modelInfo && (
+                <Card title="Информация о модели">
+                    <Descriptions bordered column={2}>
+                        <Descriptions.Item label="Модель">
+                            {modelInfo.model_name}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Точность">
+                            {modelInfo.accuracy ? `${(modelInfo.accuracy * 100).toFixed(2)}%` : 'N/A'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Горизонт прогноза">
+                            {modelInfo.forecast_horizon} периодов
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Частота данных">
+                            {modelInfo.frequency}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Время обучения">
+                            {modelInfo.training_time ? `${modelInfo.training_time.toFixed(2)} сек` : 'N/A'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="Последнее обновление">
+                            {modelInfo.last_updated ? new Date(modelInfo.last_updated).toLocaleString() : 'N/A'}
+                        </Descriptions.Item>
+                    </Descriptions>
+                </Card>
+            )}
 
-  // Доступные квантили
-  const availableQuantiles = predictionResult.plots?.metadata?.quantiles || ['0.5'];
-
-  return (
-    <Card 
-      title={
-        <Space>
-          <TitleTypography level={4}>Результаты прогнозирования</TitleTypography>
-          <Tag color="blue">ID: {predictionResult.prediction_id}</Tag>
+            {/* Метрики качества */}
+            {metrics && Object.keys(metrics).length > 0 && (
+                <Card title="Метрики качества прогноза">
+                    <Table 
+                        columns={metricsColumns}
+                        dataSource={metricsData}
+                        pagination={false}
+                        size="small"
+                    />
+                </Card>
+            )}
         </Space>
-      }
-      extra={
-        <Button 
-          type="primary" 
-          icon={<CloudDownloadOutlined />} 
-          onClick={onDownload}
-        >
-          Экспорт
-        </Button>
-      }
-    >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={8}>
-            <Statistic 
-              title="Количество прогнозов" 
-              value={predictionResult.predictions.length} 
-              suffix="точек"
-              prefix={<DashboardOutlined />}
-            />
-          </Col>
-          <Col xs={24} md={8}>
-            <Statistic 
-              title="Временных рядов" 
-              value={seriesList.length}
-              suffix="серий"
-              prefix={<LineChartOutlined />}
-            />
-          </Col>
-          <Col xs={24} md={8}>
-            <Space>
-              <Text strong>Квантили:</Text>
-              {availableQuantiles.map(q => (
-                <Tag key={q} color={q === '0.5' ? 'blue' : 'default'}>
-                  {q}
-                </Tag>
-              ))}
-              <Tooltip title="Квантили представляют разные уровни вероятности прогноза">
-                <InfoCircleOutlined />
-              </Tooltip>
-            </Space>
-          </Col>
-        </Row>
-
-        <Tabs 
-          activeKey={activeTab} 
-          onChange={setActiveTab}
-          tabBarExtraContent={
-            <Space>
-              {activeTab === '1' && seriesList.length > 0 && (
-                <Select
-                  placeholder="Выберите серию"
-                  value={selectedSeries}
-                  onChange={handleSeriesChange}
-                  style={{ width: 150 }}
-                  options={seriesList.map(series => ({
-                    label: series.label,
-                    value: series.id
-                  }))}
-                />
-              )}
-              {activeTab === '2' && (
-                <Radio.Group 
-                  value={dateFormat} 
-                  onChange={(e) => setDateFormat(e.target.value)}
-                  buttonStyle="solid"
-                  size="small"
-                >
-                  <Radio.Button value="day">День</Radio.Button>
-                  <Radio.Button value="month">Месяц</Radio.Button>
-                  <Radio.Button value="datetime">Дата и время</Radio.Button>
-                </Radio.Group>
-              )}
-            </Space>
-          }
-        >
-          <TabPane 
-            tab={
-              <span>
-                <LineChartOutlined />
-                График
-              </span>
-            } 
-            key="1"
-          >
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              <Space wrap>
-                <Radio.Group 
-                  value={dateFormat} 
-                  onChange={(e) => setDateFormat(e.target.value)}
-                  size="small"
-                >
-                  <Radio.Button value="day">День</Radio.Button>
-                  <Radio.Button value="month">Месяц</Radio.Button>
-                  <Radio.Button value="year">Год</Radio.Button>
-                  <Radio.Button value="datetime">Дата и время</Radio.Button>
-                  <Radio.Button value="time">Время</Radio.Button>
-                </Radio.Group>
-
-                <Divider type="vertical" />
-
-                <Tooltip title="Показать/скрыть доверительный интервал">
-                  <Button
-                    type={showConfidenceInterval ? "primary" : "default"}
-                    size="small"
-                    onClick={() => setShowConfidenceInterval(!showConfidenceInterval)}
-                  >
-                    Доверительный интервал
-                  </Button>
-                </Tooltip>
-                
-                <Select
-                  mode="multiple"
-                  style={{ minWidth: 200 }}
-                  placeholder="Выберите квантили"
-                  value={selectedQuantiles}
-                  onChange={handleQuantilesChange}
-                  options={availableQuantiles.map(q => ({ 
-                    label: `Квантиль ${q}${q === '0.5' ? ' (медиана)' : ''}`, 
-                    value: q 
-                  }))}
-                  maxTagCount={3}
-                />
-                
-                <Tooltip title="Квантили представляют различные уровни вероятности прогноза. Медиана (0.5) - это центральное значение.">
-                  <InfoCircleOutlined style={{ color: '#1677ff' }} />
-                </Tooltip>
-              </Space>
-
-              <div style={{ height: 400 }}>
-                {selectedSeries ? (
-                  <TimeSeriesChart 
-                    data={getChartData()}
-                    title={`Прогноз для серии ${selectedSeries}`}
-                    seriesName={selectedSeries}
-                    availableQuantiles={predictionResult.plots.metadata?.quantiles}
-                    showForecastLine={true}
-                  />
-                ) : (
-                  <Empty description="Выберите серию для отображения" />
-                )}
-              </div>
-            </Space>
-          </TabPane>
-          
-          <TabPane 
-            tab={
-              <span>
-                <TableOutlined />
-                Таблица
-              </span>
-            } 
-            key="2"
-          >
-            <Table 
-              dataSource={getTableData()} 
-              columns={getTableColumns()} 
-              scroll={{ x: 'max-content' }}
-              pagination={{
-                pageSize: 10,
-                showSizeChanger: true,
-                pageSizeOptions: ['10', '20', '50', '100'],
-              }}
-              size="small"
-            />
-          </TabPane>
-        </Tabs>
-
-        <div style={{ textAlign: 'center' }}>
-          <Button 
-            icon={<DownloadOutlined />}
-            onClick={onDownload}
-          >
-            Экспортировать результаты
-          </Button>
-        </div>
-      </Space>
-    </Card>
-  );
+    );
 };
 
 export default PredictionResultsView;

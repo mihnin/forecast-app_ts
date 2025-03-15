@@ -7,93 +7,53 @@ import uuid
 import json
 import logging
 from app.models.data import DataResponse, DataAnalysisRequest, DataAnalysisResponse, ColumnSelection
-from app.services.data.data_processing import process_uploaded_file, detect_frequency
+from app.services.data.data_processing import process_uploaded_file
 from app.services.data.data_validation import validate_dataset
+from app.services.data.data_service import DataService
 from app.core.config import settings
 from app.core.queue import JobQueue
+from app.core.database import get_db
+from sqlalchemy.orm import Session
+from app.utils.file_utils import save_upload_file, clean_old_files
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Временное хранилище данных (в реальном приложении здесь была бы база данных)
-DATASETS = {}
-
 @router.post("/upload", response_model=DataResponse)
 async def upload_data(
     file: UploadFile = File(...),
-    chunk_size: int = Query(settings.DEFAULT_CHUNK_SIZE, description="Размер чанка для больших файлов")
+    chunk_size: int = Query(settings.DEFAULT_CHUNK_SIZE, description="Размер чанка для больших файлов"),
+    db: Session = Depends(get_db)
 ):
     """
     Загрузка файла с данными для анализа и прогнозирования
     """
     try:
-        # Генерируем уникальный ID для датасета
-        dataset_id = str(uuid.uuid4())
+        # Очищаем старые файлы перед загрузкой нового
+        clean_old_files("data")
         
-        # Сохраняем загруженный файл во временную директорию
-        file_path = f"data/{dataset_id}_{file.filename}"
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Безопасно сохраняем файл
+        file_path, safe_filename = await save_upload_file(file, "data")
         
         # Обрабатываем файл
         df, info = process_uploaded_file(file_path, chunk_size)
         
-        # Определяем частоту временного ряда
-        try:
-            # Ищем подходящие имена для колонок даты/времени
-            date_cols = [col for col in df.columns if any(keyword in col.lower() 
-                                                         for keyword in ["date", "time", "дата", "время"])]
-            
-            # Если подходящие колонки не найдены, ищем колонки с datetime типом
-            if not date_cols:
-                date_cols = [col for col in df.columns 
-                            if pd.api.types.is_datetime64_any_dtype(df[col]) 
-                            or (pd.to_datetime(df[col], errors='coerce').notna().sum() > 0.8 * len(df))]
-            
-            # Если колонка найдена, определяем частоту
-            freq = None
-            if date_cols:
-                freq = detect_frequency(df, date_cols[0])
-                logger.info(f"Определена частота временного ряда: {freq}")
-        except Exception as e:
-            logger.warning(f"Не удалось определить частоту: {str(e)}")
-            freq = None
-        
-        # Сохраняем информацию о датасете
-        DATASETS[dataset_id] = {
-            "file_path": file_path,
-            "filename": file.filename,
-            "info": info,
-            "df": df,  # В реальном приложении мы бы не хранили DataFrame в памяти
-            "detected_frequency": freq
-        }
-        
-        # Дополняем информацию о датасете
-        additional_info = {
-            "detected_frequency": freq,
-            "has_missing_values": any(df[col].isna().any() for col in df.columns),
-            "categorical_columns": [col for col in df.columns if pd.api.types.is_categorical_dtype(df[col]) 
-                                  or pd.api.types.is_object_dtype(df[col])],
-            "numeric_columns": [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
-        }
-        
-        # Добавляем дополнительную информацию к основной
-        if hasattr(info, "additional"):
-            info.additional.update(additional_info)
-        else:
-            info.additional = additional_info
+        # Сохраняем информацию в базу данных
+        data_service = DataService(db)
+        dataset = data_service.create_dataset(file_path, safe_filename, df)
         
         # Формируем ответ
         response = DataResponse(
             success=True,
-            message=f"Файл {file.filename} успешно загружен",
-            dataset_id=dataset_id,
+            message=f"Файл {safe_filename} успешно загружен",
+            dataset_id=dataset.id,
             info=info
         )
         
         return response
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Ошибка при загрузке файла: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
@@ -103,19 +63,19 @@ async def upload_data(
 async def analyze_data(
     request: DataAnalysisRequest,
     background_tasks: BackgroundTasks,
-    queue: JobQueue = Depends()
+    queue: JobQueue = Depends(),
+    db: Session = Depends(get_db)
 ):
     """
     Выполнение анализа данных
     """
     try:
-        # Проверяем, существует ли датасет
-        if request.dataset_id not in DATASETS:
-            raise HTTPException(status_code=404, detail=f"Датасет с ID {request.dataset_id} не найден")
+        # Проверяем существование датасета
+        data_service = DataService(db)
+        dataset = data_service.get_dataset(request.dataset_id)
         
-        # Получаем данные
-        dataset = DATASETS[request.dataset_id]
-        df = dataset["df"]
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Датасет с ID {request.dataset_id} не найден")
         
         # Создаем задачу для анализа в фоне
         task_id = queue.add_task(
@@ -129,7 +89,7 @@ async def analyze_data(
             }
         )
         
-        # Возвращаем идентификатор задачи и позицию в очереди
+        # Возвращаем идентификатор задачи
         return DataAnalysisResponse(
             success=True,
             message="Задача на анализ данных успешно создана",
@@ -144,17 +104,23 @@ async def analyze_data(
 
 
 @router.get("/columns/{dataset_id}", response_model=List[str])
-async def get_columns(dataset_id: str = Path(..., description="Идентификатор набора данных")):
+async def get_columns(
+    dataset_id: str = Path(..., description="Идентификатор набора данных"),
+    db: Session = Depends(get_db)
+):
     """
     Получение списка колонок датасета
     """
     try:
-        # Проверяем, существует ли датасет
-        if dataset_id not in DATASETS:
+        # Получаем информацию о датасете из базы данных
+        data_service = DataService(db)
+        dataset = data_service.get_dataset(dataset_id)
+        
+        if not dataset:
             raise HTTPException(status_code=404, detail=f"Датасет с ID {dataset_id} не найден")
         
-        # Получаем и возвращаем список колонок
-        columns = DATASETS[dataset_id]["info"].column_names
+        # Получаем список колонок из JSON строки
+        columns = json.loads(dataset.feature_columns)
         return columns
     
     except HTTPException:
@@ -167,18 +133,26 @@ async def get_columns(dataset_id: str = Path(..., description="Идентифи�
 @router.get("/preview/{dataset_id}", response_model=Dict[str, Any])
 async def get_preview(
     dataset_id: str = Path(..., description="Идентификатор набора данных"),
-    rows: int = Query(10, description="Количество строк для предпросмотра")
+    rows: int = Query(10, description="Количество строк для предпросмотра"),
+    db: Session = Depends(get_db)
 ):
     """
     Получение предпросмотра данных
     """
     try:
-        # Проверяем, существует ли датасет
-        if dataset_id not in DATASETS:
+        # Получаем информацию о датасете из базы данных
+        data_service = DataService(db)
+        dataset = data_service.get_dataset(dataset_id)
+        
+        if not dataset:
             raise HTTPException(status_code=404, detail=f"Датасет с ID {dataset_id} не найден")
         
-        # Получаем данные
-        df = DATASETS[dataset_id]["df"]
+        # Проверяем существование файла
+        if not os.path.exists(dataset.file_path):
+            raise HTTPException(status_code=404, detail="Файл данных не найден")
+        
+        # Читаем данные из файла
+        df = pd.read_csv(dataset.file_path)
         
         # Преобразуем данные в формат для ответа
         preview = df.head(rows).to_dict(orient="records")

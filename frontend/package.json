@@ -19,7 +19,9 @@
       "yup": "^1.0.2",
       "antd": "^5.4.0",
       "@ant-design/icons": "^5.0.1",
-      "web-vitals": "^2.1.4"
+      "web-vitals": "^2.1.4",
+      "react-plotly.js": "^2.6.0",
+      "plotly.js": "^2.24.2"
     },
     "devDependencies": {
       "typescript": "^4.9.5",
