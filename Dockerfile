@@ -7,7 +7,10 @@ WORKDIR /app
 COPY frontend/package*.json ./
 
 # Устанавливаем зависимости
-RUN npm ci
+# Заменяем проблемную команду npm ci на npm install
+# npm ci требует точного соответствия package-lock.json
+# npm install более гибкий и создаст корректный package-lock.json, если нужно
+RUN npm install
 
 # Копируем остальные файлы фронтенда
 COPY frontend/ ./
