@@ -1,21 +1,16 @@
 # Базовый образ
-FROM node:20-alpine as builder
+FROM node:16-alpine as builder
 
 WORKDIR /app
 
-# Копируем файлы зависимостей
-COPY package.json ./
-COPY scripts/update-deps.sh ./scripts/
-
-# Делаем скрипт исполняемым
-RUN chmod +x ./scripts/update-deps.sh
+# Копируем файлы зависимостей фронтенда
+COPY frontend/package*.json ./
 
 # Обновляем lock-файл и устанавливаем зависимости
-RUN ./scripts/update-deps.sh
 RUN npm install
 
-# Копируем остальные файлы проекта
-COPY . .
+# Копируем остальные файлы фронтенда
+COPY frontend/ ./
 
 # Сборка проекта
 RUN npm run build
@@ -26,8 +21,8 @@ FROM nginx:alpine
 # Копируем результаты сборки в nginx
 COPY --from=builder /app/build /usr/share/nginx/html
 
-# Копируем конфигурацию nginx, если необходимо
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Копируем конфигурацию nginx
+COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
