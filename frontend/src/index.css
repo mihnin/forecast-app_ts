@@ -1,0 +1,112 @@
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #f0f2f5;
+  }
+  
+  code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+      monospace;
+  }
+  
+  .site-layout-content {
+    padding: 24px;
+    background: #fff;
+    min-height: 280px;
+  }
+  
+  .logo {
+    float: left;
+    width: 120px;
+    height: 31px;
+    margin: 16px 24px 16px 0;
+    background: rgba(255, 255, 255, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 18px;
+  }
+  
+  .ant-row-rtl .logo {
+    float: right;
+    margin: 16px 0 16px 24px;
+  }
+  
+  .chart-container {
+    height: 400px;
+    margin-bottom: 20px;
+  }
+  
+  .status-card {
+    margin-bottom: 16px;
+  }
+  
+  .queue-indicator {
+    margin-bottom: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+  }
+  
+  .queue-indicator .status-icon {
+    margin-right: 8px;
+    font-size: 20px;
+  }
+  
+  .data-preview-table {
+    margin-top: 16px;
+    overflow-x: auto;
+  }
+  
+  .feature-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .feature-card .ant-card-body {
+    flex: 1;
+  }
+  
+  .feature-icon {
+    font-size: 24px;
+    margin-bottom: 12px;
+  }
+  
+  .steps-container {
+    margin-bottom: 30px;
+  }
+  
+  .file-uploader {
+    padding: 20px;
+    border: 2px dashed #d9d9d9;
+    border-radius: 8px;
+    background-color: #fafafa;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.3s;
+  }
+  
+  .file-uploader:hover {
+    border-color: #1890ff;
+  }
+  
+  .section-divider {
+    margin: 40px 0;
+  }
+  
+  .result-section {
+    margin-top: 40px;
+  }
+  
+  .prediction-tag {
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
