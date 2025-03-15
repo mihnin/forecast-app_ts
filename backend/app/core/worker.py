@@ -2,6 +2,7 @@ from celery import Celery
 import logging
 import os
 import time
+import json
 from app.core.config import settings
 from app.core.queue import JobQueue
 from app.services.forecasting.training import train_model
@@ -45,11 +46,17 @@ def process_task(self, task_id: str):
             return
         
         logger.info(f"Обработка задачи {task_id} (тип: {task.get('task_type')})")
+        queue.add_task_log(task_id, "INFO", f"Начало выполнения задачи (тип: {task.get('task_type')})")
         
         task_type = task.get("task_type")
         params = task.get("params", {})
         
         result = None
+        
+        # Устанавливаем время начала выполнения, если его еще нет
+        if not task.get("start_time"):
+            task["start_time"] = time.time()
+            queue.redis.hset("tasks", task_id, json.dumps(task))
         
         # Обновляем прогресс до 10%
         queue.update_task_progress(task_id, 10, "Подготовка к выполнению")
@@ -58,6 +65,7 @@ def process_task(self, task_id: str):
         if task_type == "training":
             # Обновляем статус и прогресс на каждом этапе
             queue.update_task_progress(task_id, 15, "Подготовка данных")
+            queue.add_task_log(task_id, "INFO", "Подготовка данных для обучения")
             
             # Виртуальный прогресс, если обучение долгое
             start_time = time.time()
@@ -67,42 +75,56 @@ def process_task(self, task_id: str):
                 # Ограничиваем прогресс от 20% до 90%
                 scaled_progress = int(20 + progress * 0.7)
                 queue.update_task_progress(task_id, scaled_progress, stage)
+                queue.add_task_log(task_id, "INFO", f"Обучение: {progress:.1f}% завершено, этап: {stage or 'основной'}")
             
             result = train_model(params, progress_callback=progress_callback)
             
             # Обновляем прогресс
             queue.update_task_progress(task_id, 95, "Сохранение результатов")
+            queue.add_task_log(task_id, "INFO", "Сохранение результатов обучения")
             
         elif task_type == "prediction":
             queue.update_task_progress(task_id, 20, "Загрузка данных")
+            queue.add_task_log(task_id, "INFO", "Загрузка данных для прогнозирования")
+            
             queue.update_task_progress(task_id, 30, "Загрузка модели")
+            queue.add_task_log(task_id, "INFO", f"Загрузка модели {params.get('model_id', 'не указана')}")
             
             # Запуск прогнозирования
             result = make_prediction(params)
             
             queue.update_task_progress(task_id, 90, "Обработка результатов")
+            queue.add_task_log(task_id, "INFO", "Прогнозирование успешно выполнено")
             
         elif task_type == "analysis":
             # Будущая функциональность для анализа данных
             queue.update_task_progress(task_id, 20, "Анализ данных")
+            queue.add_task_log(task_id, "INFO", "Начало анализа данных")
+            
             # TODO: Реализовать анализ данных
+            
             queue.update_task_progress(task_id, 90, "Формирование отчета")
+            queue.add_task_log(task_id, "INFO", "Формирование отчета анализа")
             
         else:
-            logger.error(f"Неизвестный тип задачи: {task_type}")
-            queue.fail_task(task_id, f"Неизвестный тип задачи: {task_type}")
+            error_msg = f"Неизвестный тип задачи: {task_type}"
+            logger.error(error_msg)
+            queue.add_task_log(task_id, "ERROR", error_msg)
+            queue.fail_task(task_id, error_msg)
             return
         
         # Отмечаем задачу как выполненную
         queue.complete_task(task_id, result)
+        queue.add_task_log(task_id, "INFO", "Задача успешно выполнена")
         logger.info(f"Задача {task_id} успешно выполнена")
     
     except Exception as e:
-        logger.error(f"Ошибка при обработке задачи {task_id}: {str(e)}")
+        error_msg = f"Ошибка при обработке задачи {task_id}: {str(e)}"
+        logger.error(error_msg)
+        queue.add_task_log(task_id, "ERROR", error_msg)
         queue.fail_task(task_id, str(e))
         # Генерируем исключение для повторной попытки через Celery
         raise self.retry(exc=e)
-
 
 @celery_app.task(name="process_queue")
 def process_queue():

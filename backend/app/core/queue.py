@@ -188,3 +188,181 @@ class JobQueue:
             length: Number of tasks in queue
         """
         return self.redis.llen("task_queue")
+        
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get information about a task by ID
+        
+        Args:
+            task_id: ID of the task
+            
+        Returns:
+            Task information or None if task not found
+        """
+        task_data = self.redis.hget("tasks", task_id)
+        if not task_data:
+            return None
+        return json.loads(task_data)
+
+    def get_task_logs(self, task_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get logs for a task
+        
+        Args:
+            task_id: ID of the task
+            limit: Maximum number of records
+            
+        Returns:
+            List of task logs
+        """
+        # Get logs from Redis
+        logs_data = self.redis.lrange(f"task_log:{task_id}", 0, limit - 1)
+        logs = []
+        for log_data in logs_data:
+            log = json.loads(log_data)
+            logs.append(log)
+        return logs
+
+    def add_task_log(self, task_id: str, level: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Add a log entry for a task
+        
+        Args:
+            task_id: ID of the task
+            level: Log level (INFO, WARNING, ERROR)
+            message: Log message
+            details: Additional information
+        """
+        log_entry = {
+            "timestamp": time.time(),
+            "level": level,
+            "message": message,
+            "details": details
+        }
+        # Add log to the beginning of the list (so new ones are first)
+        self.redis.lpush(f"task_log:{task_id}", json.dumps(log_entry))
+        # Limit the number of log entries
+        self.redis.ltrim(f"task_log:{task_id}", 0, 999)  # Store maximum 1000 entries
+
+    def retry_task(self, task_id: str) -> bool:
+        """
+        Retry a failed task
+        
+        Args:
+            task_id: ID of the task
+            
+        Returns:
+            True if the task was added to the queue, otherwise False
+        """
+        task_data = self.redis.hget("tasks", task_id)
+        if not task_data:
+            return False
+            
+        task_json = json.loads(task_data)
+        if task_json["status"] != "failed":
+            return False
+        
+        # Update task state
+        task_json["status"] = "pending"
+        task_json["updated_at"] = time.time()
+        task_json["retry_count"] = task_json.get("retry_count", 0) + 1
+        task_json["error"] = None
+        
+        # Add task to queue
+        self.redis.hset("tasks", task_id, json.dumps(task_json))
+        self.redis.rpush("task_queue", task_id)
+        
+        # Add log entry
+        self.add_task_log(
+            task_id, 
+            "INFO", 
+            f"Task added for retry (attempt #{task_json['retry_count']})"
+        )
+        
+        return True
+
+    def update_task_progress(self, task_id: str, progress: int, stage: Optional[str] = None) -> bool:
+        """
+        Update task progress
+        
+        Args:
+            task_id: ID of the task
+            progress: Progress percentage (0-100)
+            stage: Current stage of execution
+            
+        Returns:
+            True if update was successful, otherwise False
+        """
+        task_data = self.redis.hget("tasks", task_id)
+        if not task_data:
+            return False
+            
+        task_json = json.loads(task_data)
+        
+        # Check that task is in executing state
+        if task_json["status"] != "executing":
+            return False
+        
+        task_json["progress"] = progress
+        task_json["updated_at"] = time.time()
+        
+        if stage and task_json.get("stage") != stage:
+            task_json["stage"] = stage
+            # Add log entry when stage changes
+            self.add_task_log(
+                task_id, 
+                "INFO", 
+                f"Execution stage: {stage}, progress: {progress}%"
+            )
+        
+        self.redis.hset("tasks", task_id, json.dumps(task_json))
+        return True
+
+    def get_queue_stats(self) -> Dict[str, Any]:
+        """
+        Get queue statistics
+        
+        Returns:
+            Dictionary with queue statistics
+        """
+        tasks = self.get_all_tasks()
+        
+        # Statistics by status
+        total_tasks = len(tasks)
+        pending_tasks = sum(1 for task in tasks if task["status"] == "pending")
+        executing_tasks = sum(1 for task in tasks if task["status"] == "executing")
+        completed_tasks = sum(1 for task in tasks if task["status"] == "completed")
+        failed_tasks = sum(1 for task in tasks if task["status"] == "failed")
+        
+        # Time statistics
+        now = time.time()
+        waiting_times = []
+        execution_times = []
+        
+        for task in tasks:
+            if task["status"] in ["executing", "completed", "failed"]:
+                # For executing tasks use last update time as start time
+                start_time = task.get("start_time", task["created_at"])
+                # Waiting time = execution start time - creation time
+                waiting_time = start_time - task["created_at"]
+                waiting_times.append(waiting_time)
+            
+            if task["status"] in ["completed", "failed"]:
+                # For completed tasks use either explicit start_time or created_at
+                start_time = task.get("start_time", task["created_at"])
+                # Execution time = completion time - execution start time
+                execution_time = task["updated_at"] - start_time
+                execution_times.append(execution_time)
+        
+        average_waiting_time = sum(waiting_times) / len(waiting_times) if waiting_times else 0
+        average_execution_time = sum(execution_times) / len(execution_times) if execution_times else 0
+        
+        return {
+            "total_tasks": total_tasks,
+            "pending_tasks": pending_tasks,
+            "executing_tasks": executing_tasks,
+            "completed_tasks": completed_tasks,
+            "failed_tasks": failed_tasks,
+            "average_waiting_time": average_waiting_time,
+            "average_execution_time": average_execution_time
+        }
