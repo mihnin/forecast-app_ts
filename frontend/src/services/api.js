@@ -30,36 +30,17 @@ api.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 405:
-          console.error('Method Not Allowed: Проверьте настройки CORS и метод запроса');
-          // Для 405 ошибки пробуем отправить предварительный OPTIONS запрос
-          if (error.config && !error.config._retry) {
-            error.config._retry = true;
-            try {
-              // Отправляем OPTIONS запрос
-              await axios({
-                method: 'OPTIONS',
-                url: error.config.url,
-                baseURL: error.config.baseURL,
-                headers: {
-                  'Access-Control-Request-Method': error.config.method.toUpperCase(),
-                  'Access-Control-Request-Headers': 'content-type'
-                }
-              });
-              // Повторяем оригинальный запрос
-              return await axios(error.config);
-            } catch (e) {
-              return Promise.reject(e);
-            }
+          // Попытка повторить запрос с предварительным OPTIONS
+          const { config } = error;
+          try {
+            await api.options(config.url);
+            return await api(config);
+          } catch (retryError) {
+            console.error('Ошибка при повторной попытке запроса:', retryError);
           }
           break;
-        case 413:
-          console.error('Payload Too Large: Файл слишком большой');
-          break;
-        case 415:
-          console.error('Unsupported Media Type: Неподдерживаемый формат файла');
-          break;
         default:
-          console.error('Server Error:', error.response.data);
+          break;
       }
     }
     return Promise.reject(error);

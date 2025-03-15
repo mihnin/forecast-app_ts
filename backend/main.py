@@ -17,12 +17,12 @@ app = FastAPI(
 # Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=["*"],  # В продакшене заменить на конкретные домены
     allow_credentials=True,
-    allow_methods=["*"],  # Разрешаем все методы
-    allow_headers=["*"],  # Разрешаем все заголовки
-    expose_headers=["*"],  # Разрешаем все заголовки в ответах
-    max_age=3600,  # Кэширование префлайт запросов на 1 час
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # Подключаем маршруты API
@@ -33,27 +33,15 @@ queue = JobQueue()
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Initialization tasks on application startup
-    """
-    # Создание необходимых директорий при старте
-    import os
-    os.makedirs("data", exist_ok=True)
-    os.makedirs("models", exist_ok=True)
-    os.makedirs("logs", exist_ok=True)
+    logger.info("Starting up application...")
+    await queue.initialize()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """
-    Cleanup tasks on application shutdown
-    """
-    try:
-        queue.cleanup()
-        logger.info("Queue resources released")
-    except Exception as e:
-        logger.error(f"Error releasing queue resources: {str(e)}")
+    logger.info("Shutting down application...")
+    await queue.cleanup()
 
-# Добавляем обработчик OPTIONS запросов для поддержки CORS
-@app.options("/{full_path:path}")
-async def options_handler():
-    return {"message": "OK"}
+# Добавляем глобальный обработчик OPTIONS запросов
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    return {}
