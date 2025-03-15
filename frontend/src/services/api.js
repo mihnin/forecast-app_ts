@@ -77,6 +77,13 @@ export const trainingService = {
     const response = await api.get('/training/models');
     return response.data;
   },
+  
+  // Получение списка обученных моделей
+  getTrainedModels: async () => {
+    // Новый метод для получения списка обученных моделей
+    const response = await api.get('/training/models/trained');
+    return response.data;
+  },
 };
 
 // Сервис для работы с прогнозированием

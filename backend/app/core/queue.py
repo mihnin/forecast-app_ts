@@ -135,10 +135,22 @@ class JobQueue:
         task_json["updated_at"] = time.time()
         task_json["result"] = result
         
+        # Calculate execution duration
+        if task_json.get("start_time"):
+            task_json["execution_duration"] = task_json["updated_at"] - task_json["start_time"]
+        
         # Update task data
         self.redis.hset("tasks", task_id, json.dumps(task_json))
         # Remove executing flag
         self.redis.delete(f"executing:{task_id}")
+        
+        # Add final log entry
+        self.add_task_log(
+            task_id, 
+            "INFO", 
+            "Задача успешно завершена",
+            {"result_summary": result.get("summary") if result and isinstance(result, dict) else None}
+        )
         
         logger.info(f"Task {task_id} marked as completed")
     
@@ -159,10 +171,21 @@ class JobQueue:
         task_json["updated_at"] = time.time()
         task_json["error"] = error
         
+        # Calculate execution duration
+        if task_json.get("start_time"):
+            task_json["execution_duration"] = task_json["updated_at"] - task_json["start_time"]
+        
         # Update task data
         self.redis.hset("tasks", task_id, json.dumps(task_json))
         # Remove executing flag
         self.redis.delete(f"executing:{task_id}")
+        
+        # Add error log entry
+        self.add_task_log(
+            task_id, 
+            "ERROR", 
+            f"Задача завершилась с ошибкой: {error}"
+        )
         
         logger.info(f"Task {task_id} marked as failed: {error}")
     
