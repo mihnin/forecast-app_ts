@@ -1,38 +1,38 @@
 # Core dependencies
-fastapi
-uvicorn
-python-multipart
-SQLAlchemy
-alembic>=1.15.0
-psycopg2-binary>=2.9.0
-redis>=5.0.0
-aioredis>=2.0.0
-holidays
-pydantic-settings
+fastapi==0.115.11
+uvicorn==0.34.0
+python-multipart==0.0.20
+SQLAlchemy==2.0.39
+alembic==1.15.1
+psycopg2-binary==2.9.10
+redis==5.2.1
+aioredis==2.0.1
+holidays==0.68
+pydantic-settings==2.8.1
 
 # Data processing and analysis
-numpy>=1.21.0
-pandas>=2.0.0
-scipy>=1.15.0
-statsmodels>=0.14.0
+numpy==1.26.4
+pandas==2.2.3
+scipy==1.15.2
+statsmodels==0.14.4
 
 # Machine learning
-scikit-learn>=1.6.0
-prophet>=1.1.0
-autogluon.timeseries>=1.0.0
+scikit-learn==1.5.2
+prophet==1.1.6
+autogluon.timeseries==1.2
 
 # Utilities
-python-jose[cryptography]
-passlib[bcrypt]
-python-magic
-aiofiles
-python-dateutil
-requests
+python-jose[cryptography]==3.4.0
+passlib[bcrypt]==1.7.4
+python-magic==0.4.27
+aiofiles==24.1.0
+python-dateutil==2.9.0.post0
+requests==2.32.3
 
 # Testing
-pytest
-pytest-asyncio
-httpx
+pytest==8.3.5
+pytest-asyncio==0.25.3
+httpx==0.28.1
 
 # Task queue
-celery>=5.4.0
+celery==5.4.0
