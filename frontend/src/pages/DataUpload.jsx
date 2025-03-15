@@ -33,41 +33,75 @@ const DataUpload = () => {
             const formData = new FormData();
             formData.append('file', file);
 
-            const response = await api.post('/data/upload', formData, {
-                onUploadProgress: (progressEvent) => {
-                    const percentage = Math.round(
-                        (progressEvent.loaded * 100) / progressEvent.total
-                    );
-                    setUploadState(prev => ({
-                        ...prev,
-                        progress: percentage
-                    }));
-                }
-            });
+            // Добавляем обработку таймаута и повторных попыток
+            const maxRetries = 3;
+            let retryCount = 0;
+            let success = false;
 
-            if (response.data.success) {
-                setUploadState(prev => ({
-                    ...prev,
-                    processingStage: 'completed',
-                    progress: 100,
-                    totalRows: response.data.info.rows_count
-                }));
-
-                // Переходим к анализу данных через 1.5 секунды
-                setTimeout(() => {
-                    navigate('/analysis', { 
-                        state: { 
-                            datasetId: response.data.dataset_id,
-                            fileName: file.name
-                        } 
+            while (retryCount < maxRetries && !success) {
+                try {
+                    const response = await api.post('/data/upload', formData, {
+                        timeout: 30000, // 30 секунд таймаут
+                        onUploadProgress: (progressEvent) => {
+                            const percentage = Math.round(
+                                (progressEvent.loaded * 100) / progressEvent.total
+                            );
+                            setUploadState(prev => ({
+                                ...prev,
+                                progress: percentage
+                            }));
+                        }
                     });
-                }, 1500);
+
+                    if (response.data.success) {
+                        setUploadState(prev => ({
+                            ...prev,
+                            processingStage: 'completed',
+                            progress: 100,
+                            totalRows: response.data.info.rows_count
+                        }));
+
+                        // Переходим к анализу данных через 1.5 секунды
+                        setTimeout(() => {
+                            navigate('/analysis', { 
+                                state: { 
+                                    datasetId: response.data.dataset_id,
+                                    fileName: file.name
+                                } 
+                            });
+                        }, 1500);
+                        
+                        success = true;
+                    }
+                } catch (err) {
+                    retryCount++;
+                    if (retryCount === maxRetries) {
+                        throw err;
+                    }
+                    // Ждем перед повторной попыткой
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
             }
         } catch (error) {
+            let errorMessage = 'Ошибка при загрузке файла';
+            
+            if (error.response) {
+                // Ошибка от сервера
+                if (error.response.status === 404) {
+                    errorMessage = 'Сервис загрузки файлов недоступен. Пожалуйста, проверьте подключение к серверу.';
+                } else if (error.response.data?.detail) {
+                    errorMessage = error.response.data.detail;
+                }
+            } else if (error.request) {
+                // Ошибка сети
+                errorMessage = 'Ошибка сети. Пожалуйста, проверьте подключение к интернету.';
+            }
+            
             setUploadState(prev => ({
                 ...prev,
-                error: error.response?.data?.detail || 'Ошибка при загрузке файла',
-                processingStage: null
+                error: errorMessage,
+                processingStage: null,
+                uploading: false
             }));
         }
     };

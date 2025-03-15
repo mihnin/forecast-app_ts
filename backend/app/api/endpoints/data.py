@@ -29,6 +29,13 @@ async def upload_data(
     Загрузка файла с данными для анализа и прогнозирования
     """
     try:
+        # Проверяем, что файл существует
+        if not file or not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Файл не был загружен"
+            )
+
         # Очищаем старые файлы перед загрузкой нового
         clean_old_files("data")
         
@@ -36,11 +43,25 @@ async def upload_data(
         file_path, safe_filename = await save_upload_file(file, "data")
         
         # Обрабатываем файл
-        df, info = process_uploaded_file(file_path, chunk_size)
+        try:
+            df, info = process_uploaded_file(file_path, chunk_size)
+        except Exception as e:
+            # Если произошла ошибка при обработке, удаляем загруженный файл
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Ошибка при обработке файла: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Ошибка при обработке файла: {str(e)}")
         
         # Сохраняем информацию в базу данных
-        data_service = DataService(db)
-        dataset = data_service.create_dataset(file_path, safe_filename, df)
+        try:
+            data_service = DataService(db)
+            dataset = data_service.create_dataset(file_path, safe_filename, df)
+        except Exception as e:
+            # Если произошла ошибка при сохранении в БД, удаляем загруженный файл
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            logger.error(f"Ошибка при сохранении в базу данных: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Ошибка при сохранении данных: {str(e)}")
         
         # Формируем ответ
         response = DataResponse(
@@ -50,13 +71,21 @@ async def upload_data(
             info=info
         )
         
-        return response
+        return JSONResponse(
+            status_code=200,
+            content=response.dict(),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type"
+            }
+        )
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Ошибка при загрузке файла: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")
+        logger.error(f"Неожиданная ошибка при загрузке файла: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Неожиданная ошибка при загрузке файла: {str(e)}")
 
 
 @router.post("/analyze", response_model=DataAnalysisResponse)
