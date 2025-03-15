@@ -1,5 +1,5 @@
 # Базовый образ
-FROM node:16-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -7,9 +7,6 @@ WORKDIR /app
 COPY frontend/package*.json ./
 
 # Устанавливаем зависимости
-# Заменяем проблемную команду npm ci на npm install
-# npm ci требует точного соответствия package-lock.json
-# npm install более гибкий и создаст корректный package-lock.json, если нужно
 RUN npm install
 
 # Копируем остальные файлы фронтенда
@@ -29,6 +26,10 @@ COPY --from=builder /app/build /usr/share/nginx/html
 
 # Копируем конфигурацию nginx
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Добавляем healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:80/ || exit 1
 
 EXPOSE 80
 
