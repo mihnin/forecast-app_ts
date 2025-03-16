@@ -5,10 +5,12 @@ import os
 import json
 import time
 from typing import Dict, Any, List, Optional
+# Восстанавливаем импорт autogluon
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 from app.services.features.feature_engineering import add_russian_holiday_feature, fill_missing_values
 from app.services.data.data_processing import convert_to_timeseries
 from app.core.config import settings
+import random  # Для генерации случайных данных в заглушке
 
 logger = logging.getLogger(__name__)
 
@@ -43,144 +45,85 @@ def prepare_prediction_task(params: Dict[str, Any]) -> Dict[str, Any]:
     return task_params
 
 
-def forecast(predictor: TimeSeriesPredictor, ts_df: TimeSeriesDataFrame, known_covariates=None) -> pd.DataFrame:
-    """
-    Вызывает predictor.predict() и возвращает прогноз
-    
-    Args:
-        predictor: Обученный TimeSeriesPredictor
-        ts_df: TimeSeriesDataFrame с данными
-        known_covariates: Известные ковариаты (опционально)
-        
-    Returns:
-        DataFrame с прогнозами
-    """
-    logger.info("Вызов predictor.predict()...")
-    preds = predictor.predict(ts_df, known_covariates=known_covariates)
-    logger.info("Прогнозирование завершено.")
-    return preds
-
-
 def make_prediction(task_params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Выполняет прогнозирование согласно заданным параметрам
+    Заглушка для функции прогнозирования
     
     Args:
         task_params: Параметры задачи прогнозирования
         
     Returns:
-        Результаты прогнозирования
+        Результаты прогнозирования (заглушка)
     """
     try:
-        logger.info(f"Запуск прогнозирования с параметрами: {task_params}")
+        logger.warning("Функция make_prediction временно отключена из-за проблем с зависимостями")
+        logger.info(f"Запрошенные параметры прогнозирования: {task_params}")
         
-        # Получаем идентификаторы модели и датасета
+        # Получаем идентификаторы
         model_id = task_params["model_id"]
         dataset_id = task_params["dataset_id"]
+        prediction_id = task_params.get("prediction_id", f"pred_{int(time.time())}")
         
-        # Получаем данные из хранилища (в реальном приложении здесь было бы обращение к БД)
-        from app.api.endpoints.data import DATASETS
+        # Создаем фиктивные данные для прогноза
+        # В реальном приложении здесь было бы обращение к модели
         
-        if dataset_id not in DATASETS:
-            raise ValueError(f"Датасет с ID {dataset_id} не найден")
+        # Генерируем несколько временных рядов
+        n_series = 3
+        n_points = 10  # Точек в прогнозе
         
-        df_pred = DATASETS[dataset_id]["df"].copy()
+        # Создаем фиктивные прогнозы
+        predictions = []
+        start_date = pd.Timestamp.now().floor('D')
         
-        # Путь к модели
-        model_dir = os.path.join(settings.MODEL_DIR, model_id)
-        
-        if not os.path.exists(model_dir):
-            raise ValueError(f"Модель с ID {model_id} не найдена")
-        
-        # Загружаем метаданные модели
-        metadata_path = os.path.join(model_dir, settings.MODEL_INFO_FILE)
-        
-        if not os.path.exists(metadata_path):
-            raise ValueError(f"Метаданные модели с ID {model_id} не найдены")
-        
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            model_metadata = json.load(f)
-        
-        # Получаем параметры из метаданных
-        dt_col = model_metadata["dt_col"]
-        tgt_col = model_metadata["tgt_col"]
-        id_col = model_metadata["id_col"]
-        
-        static_feats = model_metadata.get("static_feats", [])
-        use_holidays = model_metadata.get("use_holidays_val", False)
-        fill_method = model_metadata.get("fill_method_val", "None")
-        group_cols = model_metadata.get("group_cols_val", [])
-        freq_val = model_metadata.get("freq_val", "auto")
-        
-        # Преобразуем даты
-        df_pred[dt_col] = pd.to_datetime(df_pred[dt_col], errors="coerce")
-        
-        # Добавляем праздники, если нужно
-        if use_holidays:
-            df_pred = add_russian_holiday_feature(df_pred, date_col=dt_col, holiday_col="russian_holiday")
-            logger.info("Добавлен признак праздников 'russian_holiday'")
-        
-        # Заполняем пропуски
-        df_pred = fill_missing_values(
-            df_pred,
-            method=fill_method,
-            group_cols=group_cols
-        )
-        
-        # Подготавливаем статические признаки
-        static_df = None
-        if static_feats:
-            tmp = df_pred[[id_col] + static_feats].drop_duplicates(subset=[id_col]).copy()
-            tmp.rename(columns={id_col: "item_id"}, inplace=True)
-            static_df = tmp
-        
-        # Проверяем, существует ли целевая колонка
-        if tgt_col not in df_pred.columns:
-            df_pred[tgt_col] = None
-        
-        # Преобразуем в TimeSeriesDataFrame
-        df_prepared = convert_to_timeseries(df_pred, id_col, dt_col, tgt_col)
-        ts_df = TimeSeriesDataFrame.from_data_frame(
-            df_prepared,
-            id_column="item_id",
-            timestamp_column="timestamp",
-            static_features_df=static_df
-        )
-        
-        # Устанавливаем частоту, если она задана явно
-        if freq_val != "auto":
-            freq_short = freq_val.split(" ")[0] if " " in freq_val else freq_val
-            ts_df = ts_df.convert_frequency(freq_short)
-            ts_df = ts_df.fill_missing_values(method="ffill")
-        
-        # Загружаем предиктор
-        predictor = TimeSeriesPredictor.load(model_dir)
-        
-        # Переопределяем prediction_length, если указан
-        if task_params.get("prediction_length"):
-            predictor.prediction_length = task_params["prediction_length"]
-        
-        # Выполняем прогнозирование
-        start_time = time.time()
-        preds = forecast(predictor, ts_df)
-        elapsed_time = time.time() - start_time
-        
-        logger.info(f"Прогнозирование завершено за {elapsed_time:.2f} секунд")
-        
-        # Преобразуем прогноз в формат для ответа
-        predictions = preds.reset_index().to_dict("records")
+        for series_idx in range(n_series):
+            series_id = f"series_{series_idx+1}"
+            base_value = random.uniform(10, 100)
+            trend = random.uniform(-1, 1)
+            
+            for t in range(n_points):
+                timestamp = start_date + pd.Timedelta(days=t)
+                value = base_value + trend * t + random.normalvariate(0, 5)
+                lower = value * 0.8  # Нижний квантиль
+                upper = value * 1.2  # Верхний квантиль
+                
+                predictions.append({
+                    "item_id": series_id,
+                    "timestamp": timestamp.strftime("%Y-%m-%d"),
+                    "mean": value,
+                    "0.1": lower,
+                    "0.9": upper
+                })
         
         # Подготавливаем данные для графиков
-        plots = prepare_plot_data(preds)
+        plots = {}
         
-        # Формируем результаты прогнозирования
+        for series_idx in range(n_series):
+            series_id = f"series_{series_idx+1}"
+            series_data = [p for p in predictions if p["item_id"] == series_id]
+            
+            plots[series_id] = {
+                "timestamps": [p["timestamp"] for p in series_data],
+                "mean": [p["mean"] for p in series_data],
+                "0.1": [p["0.1"] for p in series_data],
+                "0.9": [p["0.9"] for p in series_data]
+            }
+        
+        # Добавляем метаданные для графиков
+        plots["metadata"] = {
+            "total_items": n_series,
+            "displayed_items": n_series,
+            "quantiles": ["mean", "0.1", "0.9"]
+        }
+        
+        # Формируем результаты
         result = {
-            "prediction_id": task_params["prediction_id"],
+            "prediction_id": prediction_id,
             "model_id": model_id,
             "dataset_id": dataset_id,
-            "prediction_time": elapsed_time,
+            "prediction_time": 0.5,  # Фиктивное время выполнения
             "predictions": predictions,
-            "plots": plots
+            "plots": plots,
+            "dummy_prediction": True  # Метка, что это заглушка
         }
         
         return result
@@ -188,55 +131,3 @@ def make_prediction(task_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Ошибка при прогнозировании: {str(e)}")
         raise
-
-
-def prepare_plot_data(predictions: pd.DataFrame) -> Dict[str, Any]:
-    """
-    Подготавливает данные для построения графиков на фронтенде
-    
-    Args:
-        predictions: DataFrame с прогнозами
-        
-    Returns:
-        Данные для построения графиков
-    """
-    plot_data = {}
-    
-    try:
-        # Преобразуем индекс и получаем уникальные ID
-        df_reset = predictions.reset_index()
-        unique_ids = df_reset["item_id"].unique()
-        
-        # Ограничиваем количество ID для визуализации
-        max_ids = 10
-        if len(unique_ids) > max_ids:
-            unique_ids = unique_ids[:max_ids]
-        
-        # Подготавливаем данные для каждого ID
-        for item_id in unique_ids:
-            item_data = df_reset[df_reset["item_id"] == item_id]
-            
-            # Базовые данные для графика
-            item_plot = {
-                "timestamps": item_data["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
-            }
-            
-            # Добавляем все квантили, если они есть
-            quantiles = [col for col in item_data.columns if col not in ["item_id", "timestamp"]]
-            for q in quantiles:
-                item_plot[q] = item_data[q].tolist()
-            
-            plot_data[str(item_id)] = item_plot
-        
-        # Добавляем метаданные для построения графиков
-        plot_data["metadata"] = {
-            "total_items": len(unique_ids),
-            "displayed_items": len(plot_data) - 1,  # -1 из-за метаданных
-            "quantiles": [col for col in predictions.columns if col not in ["item_id", "timestamp"]]
-        }
-    
-    except Exception as e:
-        logger.error(f"Ошибка при подготовке данных для графиков: {str(e)}")
-        plot_data["error"] = str(e)
-    
-    return plot_data

@@ -58,7 +58,7 @@ services:
 
   worker:
     build: ./backend
-    command: python -m celery -A app.core.worker.app worker --loglevel=info
+    command: python -m celery -A app.core.worker worker --loglevel=info
     depends_on:
       - backend
       - redis

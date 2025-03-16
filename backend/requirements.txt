@@ -21,8 +21,7 @@ statsmodels==0.14.4
 # Machine learning
 scikit-learn==1.5.2
 prophet==1.1.6
-# Временно отключаем пакет, вызывающий конфликты
-# autogluon.timeseries==1.2
+autogluon.timeseries==1.2
 
 # Utilities
 python-jose[cryptography]==3.4.0

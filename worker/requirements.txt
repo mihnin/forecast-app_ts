@@ -8,6 +8,11 @@ pandas==2.2.3
 scipy==1.15.2
 python-magic==0.4.27
 
+# Machine learning
+autogluon.timeseries==1.2
+prophet==1.1.6
+scikit-learn==1.5.2
+
 # Utilities
 requests==2.32.3
 python-dateutil==2.9.0.post0

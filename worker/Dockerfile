@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Запускаем Celery воркер
-CMD ["python", "-m", "celery", "-A", "app.core.worker.app", "worker", "--loglevel=info"]
+CMD ["python", "-m", "celery", "-A", "app.core.worker", "worker", "--loglevel=info"]
