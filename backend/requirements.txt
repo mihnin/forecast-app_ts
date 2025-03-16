@@ -8,8 +8,8 @@ psycopg2-binary==2.9.10
 redis==5.2.1
 aioredis==2.0.1
 holidays==0.68
-pydantic>=2.0.0,<2.1.0
-pydantic-settings>=2.0.0,<2.1.0
+pydantic>=1.10.0,<3.0.0
+pydantic-settings>=1.2.0
 openpyxl==3.1.2
 xlrd==2.0.1
 # Data processing and analysis
@@ -21,7 +21,8 @@ statsmodels==0.14.4
 # Machine learning
 scikit-learn==1.5.2
 prophet==1.1.6
-autogluon.timeseries==1.2
+# Временно отключаем пакет, вызывающий конфликты
+# autogluon.timeseries==1.2
 
 # Utilities
 python-jose[cryptography]==3.4.0
