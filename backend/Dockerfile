@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     ca-certificates \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Копирование зависимостей
