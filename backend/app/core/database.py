@@ -1,7 +1,7 @@
 """
 Database configuration and connection management
 """
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -33,7 +33,7 @@ def is_database_available(url, max_retries=3, retry_delay=2):
         try:
             temp_engine = create_engine(url)
             with temp_engine.connect() as connection:
-                connection.execute("SELECT 1")
+                connection.execute(text("SELECT 1"))
             if temp_engine:
                 temp_engine.dispose()
             return True
