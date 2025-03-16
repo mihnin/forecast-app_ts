@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import data, training, prediction, analysis, preprocessing, queue, data_cleanup
+from app.api.endpoints import data, training, prediction, analysis, preprocessing, queue
 
 api_router = APIRouter()
 
@@ -43,11 +43,4 @@ api_router.include_router(
     queue.router,
     prefix="/queue",
     tags=["queue"]
-)
-
-# Data cleanup routes
-api_router.include_router(
-    data_cleanup.router,
-    prefix="/cleanup",
-    tags=["cleanup"]
 )
