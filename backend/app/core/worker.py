@@ -1,3 +1,6 @@
+"""
+Celery worker for background tasks
+"""
 from celery import Celery
 import logging
 import os
@@ -11,20 +14,20 @@ from app.services.forecasting.prediction import make_prediction
 
 logger = logging.getLogger(__name__)
 
-# Инициализация Celery
-celery_app = Celery('tasks')
-celery_app.conf.broker_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
-celery_app.conf.result_backend = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
+# Initialize Celery app - экспортируем как app для корректного импорта из командной строки
+app = Celery('tasks')
+app.conf.broker_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
+app.conf.result_backend = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/0"
 
 # Настройка повторных попыток при ошибках
-celery_app.conf.task_acks_late = True  # Подтверждать задачи только после успешного выполнения
-celery_app.conf.task_reject_on_worker_lost = True  # Возвращать задачу в очередь при потере воркера
-celery_app.conf.worker_prefetch_multiplier = 1  # Получать только одну задачу за раз
+app.conf.task_acks_late = True  # Подтверждать задачи только после успешного выполнения
+app.conf.task_reject_on_worker_lost = True  # Возвращать задачу в очередь при потере воркера
+app.conf.worker_prefetch_multiplier = 1  # Получать только одну задачу за раз
 
 # Инициализация очереди
 queue = JobQueue()
 
-@celery_app.task(
+@app.task(
     name="process_task",
     bind=True,
     autoretry_for=(Exception,),
@@ -127,7 +130,7 @@ def process_task(self, task_id: str):
         # Генерируем исключение для повторной попытки через Celery
         raise self.retry(exc=e)
 
-@celery_app.task(name="process_queue")
+@app.task(name="process_queue")
 def process_queue():
     """
     Проверяет очередь и запускает обработку задач
@@ -147,7 +150,7 @@ def process_queue():
         logger.error(f"Ошибка при проверке очереди: {str(e)}")
 
 
-@celery_app.task(name="cleanup_old_tasks")
+@app.task(name="cleanup_old_tasks")
 def cleanup_old_tasks():
     """
     Очистка старых задач из системы (старше 30 дней)
@@ -174,7 +177,7 @@ def cleanup_old_tasks():
         logger.error(f"Ошибка при очистке старых задач: {str(e)}")
 
 
-@celery_app.on_after_configure.connect
+@app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     """
     Настройка периодических задач
