@@ -1,59 +1,61 @@
 """
-Database models for storing dataset information
+In-memory models for storing dataset information
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON, Text
 from datetime import datetime
-from app.core.database import Base
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
 
-class Dataset(Base):
+@dataclass
+class Dataset:
     """
-    Model for storing dataset information
+    Model for storing dataset information in memory
     """
-    __tablename__ = "datasets"
-
-    id = Column(String, primary_key=True)  # UUID
-    filename = Column(String, nullable=False)
-    file_path = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id: str
+    filename: str
+    file_path: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
     
     # Dataset properties
-    rows_count = Column(Integer)
-    columns_count = Column(Integer)
-    frequency = Column(String)  # Detected time series frequency
-    has_missing_values = Column(Integer, default=0)  # Boolean
+    rows_count: int = 0
+    columns_count: int = 0
+    frequency: Optional[str] = None  # Detected time series frequency
+    has_missing_values: int = 0  # Boolean
     
     # Column information
-    date_column = Column(String)  # Name of the datetime column
-    target_column = Column(String)  # Name of the target column
-    feature_columns = Column(Text)  # JSON string of feature column names
-    categorical_columns = Column(Text)  # JSON string of categorical column names
-    numeric_columns = Column(Text)  # JSON string of numeric column names
+    date_column: Optional[str] = None  # Name of the datetime column
+    target_column: Optional[str] = None  # Name of the target column
+    feature_columns: str = "[]"  # JSON string of feature column names
+    categorical_columns: str = "[]"  # JSON string of categorical column names
+    numeric_columns: str = "[]"  # JSON string of numeric column names
     
     # Statistics
-    statistics = Column(JSON)  # JSON with basic statistics (min, max, mean, etc.)
+    statistics: Dict[str, Any] = field(default_factory=dict)  # Dict with basic statistics (min, max, mean, etc.)
     
     # Additional information
-    additional_info = Column(JSON)  # Any additional dataset information
+    additional_info: Dict[str, Any] = field(default_factory=dict)  # Any additional dataset information
 
-class DatasetPreprocessing(Base):
+@dataclass
+class DatasetPreprocessing:
     """
-    Model for storing dataset preprocessing information
+    Model for storing dataset preprocessing information in memory
     """
-    __tablename__ = "dataset_preprocessing"
-
-    id = Column(String, primary_key=True)  # UUID
-    dataset_id = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id: str
+    dataset_id: str
+    created_at: datetime = field(default_factory=datetime.utcnow)
     
     # Preprocessing parameters
-    fill_method = Column(String)  # Method used for filling missing values
-    scaling_method = Column(String)  # Method used for scaling
-    encoding_method = Column(String)  # Method used for encoding categoricals
+    fill_method: Optional[str] = None  # Method used for filling missing values
+    scaling_method: Optional[str] = None  # Method used for scaling
+    encoding_method: Optional[str] = None  # Method used for encoding categoricals
     
     # Preprocessing results
-    missing_values_filled = Column(Integer)  # Number of filled values
-    categorical_features_encoded = Column(Integer)  # Number of encoded features
+    missing_values_filled: int = 0  # Number of filled values
+    categorical_features_encoded: int = 0  # Number of encoded features
     
     # Additional information
-    preprocessing_info = Column(JSON)  # Additional preprocessing details
+    preprocessing_info: Dict[str, Any] = field(default_factory=dict)  # Additional preprocessing details
+
+# Global in-memory storage
+datasets = {}
+preprocessings = {}

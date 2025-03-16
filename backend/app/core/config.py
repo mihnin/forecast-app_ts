@@ -1,94 +1,99 @@
 import os
-from typing import Dict, Any, List, Optional
-from pydantic_settings import BaseSettings
+from typing import Any, Dict, List, Optional
+from pydantic import BaseSettings, validator
+import json
+from pathlib import Path
 
 class Settings(BaseSettings):
     """
     Application settings
     """
-    # API settings
+    PROJECT_NAME: str = "Прогнозирование временных рядов"
     API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Time Series Forecast API"
     
-    # Environment
+    # Режим отладки
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    
+    # Настройки окружения
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    DEBUG: bool = ENVIRONMENT == "development"
     
-    # CORS - более безопасная конфигурация
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost",
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8000"
-    ]
+    # Лимиты ресурсов
+    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+    MAX_MEMORY_GB: int = int(os.getenv("MAX_MEMORY_GB", "8"))
     
-    # Redis
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    # Настройки Redis
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_URL: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
     
-    # Worker settings
-    MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", 2))
+    # Настройки путей для хранения данных
+    DATA_DIR: str = "data"
+    MODELS_DIR: str = "models"
+    TEMP_DIR: str = "temp"
     
-    # Model settings
-    MODEL_DIR: str = "models/TimeSeriesModel"
-    MODEL_INFO_FILE: str = "model_info.json"
+    # Настройки очистки временных файлов
+    MAX_FILE_AGE_DAYS: int = 7  # Максимальный возраст файлов в днях
     
-    # Default parameters
-    DEFAULT_CHUNK_SIZE: int = 100000
-    DEFAULT_PREDICTION_LENGTH: int = 10
-    DEFAULT_TIME_LIMIT: int = 60
-    DEFAULT_FREQ: str = "auto"
-    DEFAULT_FILL_METHOD: str = "None"
-    DEFAULT_METRIC: str = "MASE"
-    DEFAULT_PRESET: str = "medium_quality"
+    # Настройки обработки данных
+    DEFAULT_CHUNK_SIZE: int = 100000  # Размер чанка для чтения больших файлов
+    MAX_UPLOAD_SIZE_MB: int = 200  # Максимальный размер загружаемого файла в МБ
     
-    # Metrics and models (migrated from config/config.yaml)
-    METRICS_DICT: Dict[str, str] = {
-        "SQL (Scaled quantile loss)": "SQL",
-        "WQL (Weighted quantile loss)": "WQL",
-        "MAE (Mean absolute error)": "MAE",
-        "MAPE (Mean absolute percentage error)": "MAPE",
-        "MASE (Mean absolute scaled error)": "MASE",
-        "MSE (Mean squared error)": "MSE",
-        "RMSE (Root mean squared error)": "RMSE",
-        "RMSLE (Root mean squared logarithmic error)": "RMSLE",
-        "RMSSE (Root mean squared scaled error)": "RMSSE",
-        "SMAPE (Symmetric mean absolute percentage error)": "SMAPE",
-        "WAPE (Weighted absolute percentage error)": "WAPE"
+    # Настройки прогнозирования
+    DEFAULT_PREDICTION_LENGTH: int = 10  # Длина прогноза по умолчанию
+    MAX_PREDICTION_LENGTH: int = 365  # Максимальная длина прогноза
+    
+    # Настройки обучения моделей
+    DEFAULT_TRAINING_TIME_LIMIT: int = 60  # Лимит времени обучения в секундах
+    MAX_TRAINING_TIME_LIMIT: int = 3600  # Максимальный лимит времени обучения в секундах
+    
+    # Доступные модели
+    AVAILABLE_MODELS: List[str] = [
+        "DeepAR",
+        "Prophet",
+        "Transformer",
+        "NPTS",
+        "ARIMA",
+        "ETS",
+        "AutoETS",
+        "NBEATS",
+        "FFT",
+        "AutoARIMA",
+        "SeasonalNaive",
+        "Theta",
+    ]
+    
+    # Категории моделей
+    MODEL_CATEGORIES: Dict[str, List[str]] = {
+        "deep_learning": ["DeepAR", "Transformer", "NBEATS"],
+        "statistical": ["ARIMA", "ETS", "AutoETS", "AutoARIMA", "Theta"],
+        "baseline": ["Prophet", "NPTS", "SeasonalNaive", "FFT"],
     }
     
-    AG_MODELS: Dict[str, str] = {
-        "NaiveModel": "Базовая модель: прогноз = последнее наблюдение",
-        "SeasonalNaiveModel": "Прогноз = последнее значение той же фазы сезона",
-        "AverageModel": "Прогноз = среднее/квантиль",
-        "SeasonalAverageModel": "Прогноз = среднее по тем же фазам сезона",
-        "ZeroModel": "Прогноз = 0",
-        "ETSModel": "Экспоненциальное сглаживание (ETS)",
-        "AutoARIMAModel": "Автоматическая ARIMA",
-        "AutoETSModel": "Автоматическая ETS",
-        "AutoCESModel": "Комплексное экспоненциальное сглаживание (AIC)",
-        "ThetaModel": "Theta",
-        "ADIDAModel": "Intermittent demand (ADIDA)",
-        "CrostonModel": "Intermittent demand (Croston)",
-        "IMAPAModel": "Intermittent demand (IMAPA)",
-        "NPTSModel": "Non-Parametric Time Series",
-        "DeepARModel": "RNN (DeepAR)",
-        "DLinearModel": "DLinear (убирает тренд)",
-        "PatchTSTModel": "PatchTST (Transformer)",
-        "SimpleFeedForwardModel": "Простая полносвязная сеть",
-        "TemporalFusionTransformerModel": "LSTM + Transformer (TFT)",
-        "TiDEModel": "Time series dense encoder",
-        "WaveNetModel": "WaveNet (CNN)",
-        "DirectTabularModel": "AutoGluon-Tabular (Direct)",
-        "RecursiveTabularModel": "AutoGluon-Tabular (Recursive)",
-        "ChronosModel": "Chronos pretrained"
+    # Конфигурации моделей
+    MODEL_CONFIGS: Dict[str, Dict[str, Any]] = {
+        "DeepAR": {
+            "context_length": 100,
+            "epochs": 10,
+            "learning_rate": 1e-3,
+        },
+        "Transformer": {
+            "context_length": 100,
+            "epochs": 10,
+            "learning_rate": 1e-3,
+        },
+        # Другие модели могут иметь дополнительные параметры
     }
-
+    
     class Config:
+        env_file = ".env"
         case_sensitive = True
 
 
+# Создаем объект настроек
 settings = Settings()
+
+# Создаем папки, если они не существуют
+os.makedirs(settings.DATA_DIR, exist_ok=True)
+os.makedirs(settings.MODELS_DIR, exist_ok=True)
+os.makedirs(settings.TEMP_DIR, exist_ok=True)

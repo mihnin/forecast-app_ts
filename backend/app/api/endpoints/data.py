@@ -13,13 +13,14 @@ from app.services.data.data_validation import validate_dataset
 from app.services.data.data_service import DataService
 from app.core.config import settings
 from app.core.queue import JobQueue
-from app.core.database import get_db
-from sqlalchemy.orm import Session
 from app.utils.file_utils import save_upload_file, clean_old_files
 from fastapi.middleware.cors import CORSMiddleware
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Создаем экземпляр сервиса для работы с данными (без базы данных)
+data_service = DataService()
 
 @router.options("/upload")
 async def upload_options():
@@ -40,7 +41,6 @@ async def upload_options():
 async def upload_data(
     file: UploadFile = File(...),
     chunk_size: int = Query(settings.DEFAULT_CHUNK_SIZE, description="Размер чанка для больших файлов"),
-    db: Session = Depends(get_db)
 ):
     """
     Загрузка файла с данными для анализа и прогнозирования
@@ -198,20 +198,19 @@ async def upload_data(
                 detail="Файл должен содержать колонку с датами для анализа временных рядов"
             )
             
-        # Сохраняем информацию в базу данных
+        # Сохраняем информацию в памяти
         try:
-            logger.info(f"Сохранение информации о датасете в базу данных")
-            data_service = DataService(db)
+            logger.info(f"Сохранение информации о датасете в память")
             dataset = data_service.create_dataset(file_path, safe_filename, df)
             logger.info(f"Датасет сохранен с ID: {dataset.id}")
         except Exception as e:
             if os.path.exists(file_path):
                 os.remove(file_path)
-            logger.error(f"Ошибка при сохранении в базу данных: {str(e)}")
+            logger.error(f"Ошибка при сохранении в память: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(
                 status_code=500,
-                detail=f"Ошибка при сохранении данных в базу: {str(e)}"
+                detail=f"Ошибка при сохранении данных: {str(e)}"
             )
         
         # Формируем ответ
@@ -255,14 +254,12 @@ async def analyze_data(
     request: DataAnalysisRequest,
     background_tasks: BackgroundTasks,
     queue: JobQueue = Depends(),
-    db: Session = Depends(get_db)
 ):
     """
     Выполнение анализа данных
     """
     try:
         # Проверяем существование датасета
-        data_service = DataService(db)
         dataset = data_service.get_dataset(request.dataset_id)
         
         if not dataset:
@@ -297,14 +294,12 @@ async def analyze_data(
 @router.get("/columns/{dataset_id}", response_model=List[str])
 async def get_columns(
     dataset_id: str = Path(..., description="Идентификатор набора данных"),
-    db: Session = Depends(get_db)
 ):
     """
     Получение списка колонок датасета
     """
     try:
-        # Получаем информацию о датасете из базы данных
-        data_service = DataService(db)
+        # Получаем информацию о датасете из памяти
         dataset = data_service.get_dataset(dataset_id)
         
         if not dataset:
@@ -325,14 +320,12 @@ async def get_columns(
 async def get_preview(
     dataset_id: str = Path(..., description="Идентификатор набора данных"),
     rows: int = Query(10, description="Количество строк для предпросмотра"),
-    db: Session = Depends(get_db)
 ):
     """
     Получение предпросмотра данных
     """
     try:
-        # Получаем информацию о датасете из базы данных
-        data_service = DataService(db)
+        # Получаем информацию о датасете из памяти
         dataset = data_service.get_dataset(dataset_id)
         
         if not dataset:
