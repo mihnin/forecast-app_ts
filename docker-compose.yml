@@ -57,13 +57,14 @@ services:
           memory: 2G
 
   worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
     command: python -m celery -A app.core.worker worker --loglevel=info
     depends_on:
       - backend
       - redis
     volumes:
-      - ./backend:/app
       - ./data:/app/data
       - ./models:/app/models
     env_file:
