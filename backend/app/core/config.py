@@ -1,6 +1,6 @@
 import os
 from typing import Any, Dict, List, Optional
-from pydantic import BaseSettings, validator
+from pydantic_settings import BaseSettings
 import json
 from pathlib import Path
 
