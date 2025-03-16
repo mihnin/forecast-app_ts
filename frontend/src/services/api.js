@@ -18,6 +18,12 @@ api.interceptors.request.use(
       ...config.headers,
       'Accept': 'application/json',
     };
+    
+    // Если отправляем FormData, не устанавливаем Content-Type вручную
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+    
     return config;
   },
   error => Promise.reject(error)
@@ -28,6 +34,8 @@ api.interceptors.response.use(
   response => response,
   async error => {
     if (error.response) {
+      console.error('Response error:', error.response.status, error.response.data);
+      
       switch (error.response.status) {
         case 405:
           // Попытка повторить запрос с предварительным OPTIONS

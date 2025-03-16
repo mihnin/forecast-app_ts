@@ -31,7 +31,7 @@ async def upload_options():
         headers={
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Content-Length",
+            "Access-Control-Allow-Headers": "*",
             "Access-Control-Max-Age": "86400",
         }
     )
@@ -62,9 +62,8 @@ async def upload_data(
                 file_size = file.size
             else:
                 # Если размер не доступен напрямую, читаем кусок и проверяем позицию
-                await file.seek(0)
-                chunk = await file.read(8192)
-                file_size = 8192 if chunk else 0
+                file_contents = await file.read()
+                file_size = len(file_contents) if file_contents else 0
                 await file.seek(0)  # Возвращаем указатель в начало
             
             # Проверяем, что файл не пустой
